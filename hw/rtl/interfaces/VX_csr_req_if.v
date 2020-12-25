@@ -12,10 +12,11 @@ interface VX_csr_req_if ();
     wire [31:0]             PC;
     wire [`CSR_BITS-1:0]    op_type;
     wire [`CSR_ADDR_BITS-1:0] csr_addr;
-    wire [31:0]             csr_mask;
+    wire [31:0]             rs1_data;
+    wire                    rs2_is_imm;
+    wire [`NR_BITS-1:0]     rs1;
     wire [`NR_BITS-1:0]     rd;
     wire                    wb;
-    wire                    is_io;  
     
     wire                    ready;
     

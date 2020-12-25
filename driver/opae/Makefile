@@ -1,10 +1,13 @@
 OPAE_HOME ?= /tools/opae/1.4.0
 
+#CXXFLAGS += -std=c++11 -O2 -DNDEBUG -Wall -Wextra -pedantic -Wfatal-errors
 CXXFLAGS += -std=c++11 -O0 -g -Wall -Wextra -pedantic -Wfatal-errors
 
 CXXFLAGS += -I../include -I$(OPAE_HOME)/include  -I../../hw
 
 LDFLAGS += -L$(OPAE_HOME)/lib
+
+#SCOPE=1
 
 # stack execution protection
 LDFLAGS +=-z noexecstack
@@ -18,11 +21,11 @@ CXXFLAGS +=-fstack-protector
 # Position independent code
 CXXFLAGS += -fPIC
 
+# Add external configuration
+CXXFLAGS += $(CONFIGS)
+
 # Dump perf stats
 CXXFLAGS += -DDUMP_PERF_STATS
-
-# Enable scope analyzer
-#CXXFLAGS += -DSCOPE
 
 LDFLAGS += -shared
 
@@ -32,11 +35,13 @@ ASE_LIBS += -luuid -lopae-c-ase
 
 VLSIM_LIBS += -lopae-c-vlsim
 
-LIB_DIR=../lib
-
 ASE_DIR = ase
 
 VLSIM_DIR = vlsim
+
+RTL_DIR=../../hw/rtl
+
+SCRIPT_DIR=../../hw/scripts
 
 PROJECT = libvortex.so
 
@@ -46,7 +51,21 @@ PROJECT_VLSIM = $(VLSIM_DIR)/libvortex.so
 
 AFU_JSON_INFO = vortex_afu.h
 
-SRCS = vortex.cpp vx_scope.cpp ../common/vx_utils.cpp
+SRCS = vortex.cpp ../common/vx_utils.cpp
+
+# Enable scope analyzer
+ifdef SCOPE
+	CXXFLAGS += -DSCOPE	
+	SRCS += vx_scope.cpp
+	SCOPE_ENABLE = SCOPE=1
+	SCOPE_H = scope-defs.h 
+endif
+
+# Enable perf counters
+ifdef PERF
+	CXXFLAGS += -DPERF_ENABLE
+	PERF_ENABLE = PERF=1
+endif
 
 all: vlsim
 
@@ -54,17 +73,23 @@ all: vlsim
 json: ../../hw/opae/vortex_afu.json
 	afu_json_mgr json-info --afu-json=$^ --c-hdr=$@
 
-fpga: $(SRCS)
-	$(CXX) $(CXXFLAGS) $^ $(LDFLAGS) $(FPGA_LIBS) -o $(PROJECT)
+scope-defs.h: $(SCRIPT_DIR)/scope.json
+	$(SCRIPT_DIR)/scope.py $(RTL_INCLUDE) $(CONFIGS) -cc scope-defs.h -vl $(RTL_DIR)/scope-defs.vh $(SCRIPT_DIR)/scope.json
 
-ase: $(SRCS) $(ASE_DIR)
+# generate scope data
+scope: scope-defs.h
+
+vlsim-hw: $(SCOPE_H)
+	$(SCOPE_ENABLE) $(PERF_ENABLE) $(MAKE) -C vlsim
+
+fpga: $(SRCS) $(SCOPE_H)
+	$(CXX) $(CXXFLAGS) -DUSE_FPGA $^ $(LDFLAGS) $(FPGA_LIBS) -o $(PROJECT)
+
+asesim: $(SRCS) $(ASE_DIR) $(SCOPE_H)
 	$(CXX) $(CXXFLAGS) -DUSE_ASE $(SRCS) $(LDFLAGS) $(ASE_LIBS) -o $(PROJECT_ASE)
 
-vlsim: $(SRCS) opae-vlsim
-	$(CXX) $(CXXFLAGS) -L./vlsim -DUSE_VLSIM $(SRCS) $(LDFLAGS) $(VLSIM_LIBS) -o $(PROJECT_VLSIM)
-
-opae-vlsim:
-	$(MAKE) -C vlsim
+vlsim: $(SRCS) vlsim-hw
+	$(CXX) $(CXXFLAGS) -DUSE_VLSIM $(SRCS) $(LDFLAGS) -L./vlsim $(VLSIM_LIBS) -o $(PROJECT_VLSIM)
 
 vortex.o: vortex.cpp
 	$(CXX) $(CXXFLAGS) -c vortex.cpp -o $@
@@ -77,7 +102,7 @@ $(ASE_DIR):
 
 clean:
 	rm -rf $(PROJECT) $(PROJECT_ASE) $(PROJECT_VLSIM) *.o .depend
-	$(MAKE) -C vlsim clean	
+	$(MAKE) -C vlsim clean
 
 ifneq ($(MAKECMDGOALS),clean)
     -include .depend

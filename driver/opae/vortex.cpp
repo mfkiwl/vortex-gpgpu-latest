@@ -7,11 +7,11 @@
 #include <assert.h>
 #include <cmath>
 
-#ifdef USE_VLSIM
-#include "vlsim/fpga.h"
-#else
+#if defined(USE_FPGA) || defined(USE_ASE) 
 #include <opae/fpga.h>
 #include <uuid/uuid.h>
+#elif defined(USE_VLSIM)
+#include "vlsim/fpga.h"
 #endif
 
 #include <vortex.h>
@@ -26,14 +26,14 @@
 #define ALLOC_BASE_ADDR  0x10000000
 #define LOCAL_MEM_SIZE   0xffffffff
 
-#define CHECK_RES(_expr)                                            \
-   do {                                                             \
-     fpga_result res = _expr;                                       \
-     if (res == FPGA_OK)                                            \
-       break;                                                       \
-     printf("OPAE Error: '%s' returned %d, %s!\n",                  \
-            #_expr, (int)res, fpgaErrStr(res));                     \
-     return -1;                                                     \
+#define CHECK_RES(_expr)                                \
+   do {                                                 \
+     fpga_result res = _expr;                           \
+     if (res == FPGA_OK)                                \
+       break;                                           \
+     printf("[VXDRV] Error: '%s' returned %d, %s!\n",   \
+            #_expr, (int)res, fpgaErrStr(res));         \
+     return -1;                                         \
    } while (false)
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -118,7 +118,7 @@ extern int vx_dev_caps(vx_device_h hdevice, unsigned caps_id, unsigned *value) {
         *value = STARTUP_ADDR;
         break;
     default:
-        fprintf(stderr, "invalid caps id: %d\n", caps_id);
+        fprintf(stderr, "[VXDRV] Error: invalid caps id: %d\n", caps_id);
         std::abort();
         return -1;
     }
@@ -130,39 +130,57 @@ extern int vx_dev_open(vx_device_h* hdevice) {
     if (nullptr == hdevice)
         return  -1;
 
-    fpga_result res;    
     fpga_handle accel_handle;    
     vx_device_t* device;   
 
 #ifndef USE_VLSIM
+    fpga_result res;    
     fpga_token accel_token;
     fpga_properties filter = nullptr;    
     fpga_guid guid; 
     uint32_t num_matches;
     
     // Set up a filter that will search for an accelerator
-    fpgaGetProperties(nullptr, &filter);
-    fpgaPropertiesSetObjectType(filter, FPGA_ACCELERATOR);
+    CHECK_RES(fpgaGetProperties(nullptr, &filter));
+    res = fpgaPropertiesSetObjectType(filter, FPGA_ACCELERATOR);
+    if (res != FPGA_OK) {
+        fprintf(stderr, "[VXDRV] Error: fpgaGetProperties() returned %d, %s!\n", (int)res, fpgaErrStr(res));
+        fpgaDestroyProperties(&filter);
+        return -1;
+    }
 
     // Add the desired UUID to the filter
     uuid_parse(AFU_ACCEL_UUID, guid);
-    fpgaPropertiesSetGUID(filter, guid);
+    res = fpgaPropertiesSetGUID(filter, guid);
+    if (res != FPGA_OK) {
+        fprintf(stderr, "[VXDRV] Error: fpgaPropertiesSetGUID() returned %d, %s!\n", (int)res, fpgaErrStr(res));
+        fpgaDestroyProperties(&filter);
+        return -1;
+    }
 
     // Do the search across the available FPGA contexts
     num_matches = 1;
-    fpgaEnumerate(&filter, 1, &accel_token, 1, &num_matches);
+    res = fpgaEnumerate(&filter, 1, &accel_token, 1, &num_matches);
+    if (res != FPGA_OK) {
+        fprintf(stderr, "[VXDRV] Error: fpgaEnumerate() returned %d, %s!\n", (int)res, fpgaErrStr(res));
+        fpgaDestroyProperties(&filter);
+        return -1;
+    }
 
     // Not needed anymore
     fpgaDestroyProperties(&filter);
 
     if (num_matches < 1) {
-        fprintf(stderr, "Accelerator %s not found!\n", AFU_ACCEL_UUID);
+        fprintf(stderr, "[VXDRV] Error: accelerator %s not found!\n", AFU_ACCEL_UUID);
+        fpgaDestroyToken(&accel_token);
         return -1;
     }
 
     // Open accelerator
     res = fpgaOpen(accel_token, &accel_handle, 0);
-    if (FPGA_OK != res) {
+    if (res != FPGA_OK) {
+        fprintf(stderr, "[VXDRV] Error: fpgaOpen() returned %d, %s!\n", (int)res, fpgaErrStr(res));
+        fpgaDestroyToken(&accel_token);
         return -1;
     }
 
@@ -170,10 +188,7 @@ extern int vx_dev_open(vx_device_h* hdevice) {
     fpgaDestroyToken(&accel_token);
 #else
     // Open accelerator
-    res = fpgaOpen(NULL, &accel_handle, 0);
-    if (FPGA_OK != res) {
-        return -1;
-    }
+    CHECK_RES(fpgaOpen(NULL, &accel_handle, 0));
 #endif
 
     // allocate device object
@@ -193,13 +208,14 @@ extern int vx_dev_open(vx_device_h* hdevice) {
         ret |= vx_csr_get(device, 0, CSR_NC, &device->num_cores);        
         ret |= vx_csr_get(device, 0, CSR_NW, &device->num_warps);        
         ret |= vx_csr_get(device, 0, CSR_NT, &device->num_threads);        
-        if (ret != 0) {
+        if (ret != FPGA_OK) {
             fpgaClose(accel_handle);
             return ret;
         }
-
-        fprintf(stdout, "DEVCAPS: version=%d, num_cores=%d, num_warps=%d, num_threads=%d\n", 
+    #ifndef NDEBUG    
+        fprintf(stdout, "[VXDRV] DEVCAPS: version=%d, num_cores=%d, num_warps=%d, num_threads=%d\n", 
                 device->implementation_id, device->num_cores, device->num_warps, device->num_threads);
+    #endif
     }
     
 #ifdef SCOPE
@@ -228,27 +244,7 @@ extern int vx_dev_close(vx_device_h hdevice) {
 #endif
 
 #ifdef DUMP_PERF_STATS
-    // Dump perf stats
-    if (device->num_cores > 1) {
-        uint64_t total_instrs = 0, total_cycles = 0;
-        for (unsigned core_id = 0; core_id < device->num_cores; ++core_id) {           
-            uint64_t instrs, cycles;
-            int ret = vx_get_perf(hdevice, core_id, &instrs, &cycles);
-            assert(ret == 0);
-            float IPC = (float)(double(instrs) / double(cycles));
-            fprintf(stdout, "PERF: core%d: instrs=%ld, cycles=%ld, IPC=%f\n", core_id, instrs, cycles, IPC);            
-            total_instrs += instrs;
-            total_cycles = std::max<uint64_t>(total_cycles, cycles);
-        }
-        float IPC = (float)(double(total_instrs) / double(total_cycles));
-        fprintf(stdout, "PERF: instrs=%ld, cycles=%ld, IPC=%f\n", total_instrs, total_cycles, IPC);    
-    } else {
-        uint64_t instrs, cycles;
-        int ret = vx_get_perf(hdevice, 0, &instrs, &cycles);
-        float IPC = (float)(double(instrs) / double(cycles));
-        assert(ret == 0);
-        fprintf(stdout, "PERF: instrs=%ld, cycles=%ld, IPC=%f\n", instrs, cycles, IPC);        
-    }
+    vx_dump_perf(device, stdout);
 #endif
 
     fpgaClose(device->fpga);
@@ -373,7 +369,7 @@ extern int vx_ready_wait(vx_device_h hdevice, long long timeout) {
         CHECK_RES(fpgaReadMMIO64(device->fpga, 0, MMIO_STATUS, &data));
         if (0 == data || 0 == timeout) {
             if (data != 0) {
-                fprintf(stdout, "ready-wait timed out: status=%ld\n", data);
+                fprintf(stdout, "[VXDRV] ready-wait timed out: status=%ld\n", data);
             }
             break;
         }
@@ -509,12 +505,6 @@ extern int vx_start(vx_device_h hdevice) {
     // start execution    
     CHECK_RES(fpgaWriteMMIO64(device->fpga, 0, MMIO_CMD_TYPE, CMD_RUN));
 
-#ifdef SCOPE
-    sleep(15);
-    vx_scope_stop(device->fpga, 0);
-    exit(0);
-#endif
-
     return 0;
 }
 
@@ -547,7 +537,7 @@ extern int vx_csr_get(vx_device_h hdevice, int core_id, int addr, unsigned* valu
 
     // Ensure ready for new command
     if (vx_ready_wait(hdevice, -1) != 0)
-        return -1; 
+        return -1;
 
     // write CSR value    
     CHECK_RES(fpgaWriteMMIO64(device->fpga, 0, MMIO_CSR_CORE, core_id));

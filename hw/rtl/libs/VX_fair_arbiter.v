@@ -1,17 +1,20 @@
 `include "VX_platform.vh"
 
 module VX_fair_arbiter #(
-    parameter N = 1
+    parameter NUM_REQS     = 1,
+    parameter LOCK_ENABLE  = 0,
+    parameter LOG_NUM_REQS = $clog2(NUM_REQS)
 ) (
-    input  wire                  clk,
-    input  wire                  reset,
-    input  wire [N-1:0]          requests,           
-    output wire [`LOG2UP(N)-1:0] grant_index,
-    output wire [N-1:0]          grant_onehot,   
-    output wire                  grant_valid
+    input  wire                     clk,
+    input  wire                     reset,
+    input  wire                     enable,
+    input  wire [NUM_REQS-1:0]      requests, 
+    output wire [LOG_NUM_REQS-1:0]  grant_index,
+    output wire [NUM_REQS-1:0]      grant_onehot,   
+    output wire                     grant_valid
   );
 
-    if (N == 1)  begin                
+    if (NUM_REQS == 1)  begin                
         
         `UNUSED_VAR (clk)
         `UNUSED_VAR (reset)
@@ -21,49 +24,34 @@ module VX_fair_arbiter #(
 
     end else begin    
 
-       reg  [N-1:0] requests_use;
-       wire [N-1:0] update_value;
-       wire [N-1:0] late_value;
+        reg [NUM_REQS-1:0] remaining;
+        reg use_buffer;     
 
-       wire         refill;
-       wire [N-1:0] refill_value;
-       reg  [N-1:0] refill_original;
+        wire [NUM_REQS-1:0] requests_use = use_buffer ? remaining : requests;
+        wire [NUM_REQS-1:0] remaining_next = requests_use & ~grant_onehot;
 
-       always @(posedge clk) begin
+        always @(posedge clk) begin
             if (reset) begin
-                requests_use    <= 0;
-                refill_original <= 0;
-            end else begin
-                if (refill) begin
-                    requests_use    <= refill_value;
-                    refill_original <= refill_value;
-                end else begin
-                    requests_use <= update_value;
-                end
+                remaining  <= 0;
+                use_buffer <= 0;
+            end else if (!LOCK_ENABLE || enable) begin
+                remaining  <= remaining_next;
+                use_buffer <= (remaining_next != 0);
             end
-       end
-
-       assign refill       = (requests_use == 0);
-       assign refill_value = requests;
-        
-        reg [N-1:0] grant_onehot_r; 
-
-        VX_priority_encoder #(
-            .N(N)
-        ) priority_encoder (
-            .data_in   (requests_use),
-            .data_out  (grant_index ),
-            .valid_out (grant_valid )
-        );
-
-        always @(*) begin
-            grant_onehot_r = N'(0);
-            grant_onehot_r[grant_index] = 1;
         end
-        assign grant_onehot = grant_onehot_r;    
-        assign late_value   = ((refill_original ^ requests) & ~refill_original);
-        assign update_value = (requests_use & ~grant_onehot_r) | late_value;
-
+               
+        VX_fixed_arbiter #(
+            .NUM_REQS(NUM_REQS),
+            .LOCK_ENABLE(LOCK_ENABLE)
+        ) fixed_arbiter (
+            .clk          (clk),
+            .reset        (reset),
+            .enable       (enable),
+            .requests     (requests_use), 
+            .grant_index  (grant_index),
+            .grant_onehot (grant_onehot),
+            .grant_valid  (grant_valid)
+        );
     end
     
 endmodule

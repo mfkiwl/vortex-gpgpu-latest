@@ -28,8 +28,12 @@ module VX_index_queue #(
     assign empty = (wr_ptr == rd_ptr);
     assign full  = (wr_a == rd_a) && (wr_ptr[`LOG2UP(SIZE)] != rd_ptr[`LOG2UP(SIZE)]);
 
-    assign enqueue = push && !full;       
+    assign enqueue = push;       
     assign dequeue = !empty && !valid[rd_a]; // auto-remove when head is invalid
+
+    always @(*) begin
+        assert(!push || !full);
+    end
 
     always @(posedge clk) begin
         if (reset) begin
@@ -38,7 +42,6 @@ module VX_index_queue #(
             valid  <= 0;     
         end else begin
             if (enqueue)  begin
-                entries[wr_a]  <= write_data;
                 valid[wr_a] <= 1;
                 wr_ptr      <= wr_ptr + 1;
             end            
@@ -49,6 +52,10 @@ module VX_index_queue #(
                 valid[read_addr] <= 0;
             end
         end
+
+        if (enqueue)  begin
+            entries[wr_a] <= write_data;
+        end  
     end
 
     assign write_addr = wr_a;

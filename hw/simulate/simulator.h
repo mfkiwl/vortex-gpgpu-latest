@@ -12,6 +12,7 @@
 #include "ram.h"
 
 #include <ostream>
+#include <list>
 #include <vector>
 #include <sstream> 
 #include <unordered_map>
@@ -50,7 +51,8 @@ private:
   typedef struct {
     int cycles_left;  
     std::array<uint8_t, GLOBAL_BLOCK_SIZE> block;
-    unsigned tag;
+    uint32_t addr;
+    uint32_t tag;
   } dram_req_t;
 
   std::unordered_map<int, std::stringstream> print_bufs_;
@@ -62,9 +64,13 @@ private:
   void eval_csr_bus();
   void eval_snp_bus();
   
-  std::vector<dram_req_t> dram_rsp_vec_;
+  std::list<dram_req_t> dram_rsp_vec_;
   bool dram_rsp_active_;
-  
+
+  bool dram_rsp_ready_;  
+  bool snp_req_ready_;
+  bool csr_io_req_ready_;
+
   bool snp_req_active_;
   bool csr_req_active_;
 

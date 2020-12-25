@@ -79,7 +79,7 @@ module VX_decode  #(
             `INST_L, 
             `INST_FL: src2_imm = {{20{u_12[11]}}, u_12};
             `INST_B:  src2_imm = {{20{instr[31]}}, instr[7], instr[30:25], instr[11:8], 1'b0};
-            default: src2_imm = 32'hdeadbeef;
+            default: src2_imm = 'x;
         endcase
     end     
 
@@ -295,7 +295,7 @@ module VX_decode  #(
 
     wire use_rs1 = is_fpu 
                 || is_gpu
-                || ((is_jalr || is_btype || is_ltype || is_stype || is_itype || is_rtype || ~is_csr_imm || is_gpu) && (rs1 != 0));
+                || ((is_jalr || is_btype || is_ltype || is_stype || is_itype || is_rtype || !is_csr_imm || is_gpu) && (rs1 != 0));
 
     wire use_rs2 = (is_fpu && ~(is_fl || (fpu_op == `FPU_SQRT) || is_fcvti || is_fcvtf || is_fmvw_clss || is_fmvx))
                 || (is_gpu && (gpu_op == `GPU_BAR || gpu_op == `GPU_WSPAWN))
@@ -350,8 +350,6 @@ module VX_decode  #(
         assign decode_if.rs3 = rs3;
     `endif
 
-    assign decode_if.use_rs3 = use_rs3;
-    
     assign decode_if.used_regs = ((`NUM_REGS)'(use_rd)  << decode_if.rd) 
                                | ((`NUM_REGS)'(use_rs1) << decode_if.rs1) 
                                | ((`NUM_REGS)'(use_rs2) << decode_if.rs2)

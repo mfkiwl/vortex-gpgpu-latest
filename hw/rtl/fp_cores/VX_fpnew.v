@@ -2,21 +2,23 @@
 `include "fpnew_pkg.sv"
 `include "defs_div_sqrt_mvp.sv"
 
-module VX_fpnew #( 
+`TRACING_OFF
+module VX_fpnew 
+#(      
     parameter TAGW     = 1,
     parameter FMULADD  = 1,
     parameter FDIVSQRT = 1,
     parameter FNONCOMP = 1,
     parameter FCONV    = 1
 ) (
-	input wire clk,
-	input wire reset,   
+    input wire clk,
+    input wire reset,
 
     input wire  valid_in,
     output wire ready_in,
 
     input wire [TAGW-1:0] tag_in,
-	
+    
     input wire [`FPU_BITS-1:0] op_type,
     input wire [`MOD_BITS-1:0] frm,
 
@@ -76,7 +78,7 @@ module VX_fpnew #(
     wire [FMTI_BITS-1:0] fpu_int_fmt = fpnew_pkg::INT32;
 
     wire [`NUM_THREADS-1:0][31:0] fpu_result;
-    fpnew_pkg::status_t [0:`NUM_THREADS-1] fpu_status;
+    fpnew_pkg::status_t [`NUM_THREADS-1:0] fpu_status;
 
     reg [FOP_BITS-1:0] fpu_op;
     reg [`FRM_BITS-1:0] fpu_rnd;
@@ -130,8 +132,6 @@ module VX_fpnew #(
             default:;
         endcase
     end  
-
-`DISABLE_TRACING
     
     for (genvar i = 0; i < `NUM_THREADS; i++) begin
         if (0 == i) begin
@@ -159,7 +159,7 @@ module VX_fpnew #(
                 .tag_o          ({fpu_tag_out, fpu_has_fflags_out}),
                 .out_valid_o    (fpu_valid_out),
                 .out_ready_i    (fpu_ready_out),
-                `UNUSED_PIN     (busy_o)
+                `UNUSED_PIN (busy_o)
             );
         end else begin
             fpnew_top #( 
@@ -179,19 +179,17 @@ module VX_fpnew #(
                 .vectorial_op_i (1'b0),
                 .tag_i          (1'b0),
                 .in_valid_i     (fpu_valid_in),
-                `UNUSED_PIN     (in_ready_o),
+                `UNUSED_PIN (in_ready_o),
                 .flush_i        (reset),
                 .result_o       (fpu_result[i]),
                 .status_o       (fpu_status[i]),
-                `UNUSED_PIN     (tag_o),
-                `UNUSED_PIN     (out_valid_o),
+                `UNUSED_PIN (tag_o),
+                `UNUSED_PIN (out_valid_o),
                 .out_ready_i    (fpu_ready_out),
-                `UNUSED_PIN     (busy_o)
+                `UNUSED_PIN (busy_o)
             );
         end
     end
-
-`ENABLE_TRACING
 
     assign fpu_valid_in = valid_in;
     assign ready_in = fpu_ready_in;
@@ -207,4 +205,5 @@ module VX_fpnew #(
     assign valid_out = fpu_valid_out;    
     assign fpu_ready_out = ready_out;
 
-endmodule
+endmodule 
+`TRACING_ON

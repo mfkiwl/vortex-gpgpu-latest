@@ -3,6 +3,8 @@
 module VX_warp_sched #(
     parameter CORE_ID = 0
 ) (
+    `SCOPE_IO_VX_warp_sched
+    
     input wire          clk,
     input wire          reset,
 
@@ -236,16 +238,24 @@ module VX_warp_sched #(
     assign scheduled_warp = schedule_valid && ~stall_out;
 
     VX_generic_register #( 
-        .N(1 + `NUM_THREADS + 32 + `NW_BITS)
-    ) fetch_reg (
-        .clk   (clk),
-        .reset (reset),
-        .stall (stall_out),
-        .flush (1'b0),
-        .in    ({scheduled_warp,      thread_mask,         warp_pc,          warp_to_schedule}),
-        .out   ({ifetch_req_if.valid, ifetch_req_if.tmask, ifetch_req_if.PC, ifetch_req_if.wid})
+        .N(1 + `NUM_THREADS + 32 + `NW_BITS),
+        .R(1)
+    ) pipe_reg (
+        .clk      (clk),
+        .reset    (reset),
+        .stall    (stall_out),
+        .flush    (1'b0),
+        .data_in  ({scheduled_warp,      thread_mask,         warp_pc,          warp_to_schedule}),
+        .data_out ({ifetch_req_if.valid, ifetch_req_if.tmask, ifetch_req_if.PC, ifetch_req_if.wid})
     );
 
     assign busy = (active_warps != 0); 
+
+    `SCOPE_ASSIGN (wsched_scheduled_warp, scheduled_warp);
+    `SCOPE_ASSIGN (wsched_active_warps,   active_warps);
+    `SCOPE_ASSIGN (wsched_schedule_table, schedule_table);
+    `SCOPE_ASSIGN (wsched_schedule_ready, schedule_ready);
+    `SCOPE_ASSIGN (wsched_warp_to_schedule, warp_to_schedule);
+    `SCOPE_ASSIGN (wsched_warp_pc, warp_pc);
 
 endmodule

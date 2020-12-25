@@ -1,20 +1,20 @@
-`ifndef VX_FPU_TO_CMT_IF
-`define VX_FPU_TO_CMT_IF
+`ifndef VX_COMMIT_IF
+`define VX_COMMIT_IF
 
 `include "VX_define.vh"
 
-interface VX_fpu_to_cmt_if ();
+interface VX_commit_if ();
 
-    wire                    valid;      
+    wire                    valid;
+
     wire [`NW_BITS-1:0]     wid;
     wire [`NUM_THREADS-1:0] tmask;    
     wire [31:0]             PC;
     wire [`NUM_THREADS-1:0][31:0] data;
     wire [`NR_BITS-1:0]     rd;
     wire                    wb;
-    wire                    has_fflags;
-    fflags_t [`NUM_THREADS-1:0] fflags;
-    wire                    ready;
+
+    wire                    ready;  
 
 endinterface
 

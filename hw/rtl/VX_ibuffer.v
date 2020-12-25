@@ -14,21 +14,18 @@ module VX_ibuffer #(
     output wire [`NW_BITS-1:0] deq_wid_next,
     VX_decode_if  ibuf_deq_if
 );
-    localparam DATAW   = `NUM_THREADS + 32 + `EX_BITS + `OP_BITS + `FRM_BITS + 1 + (`NR_BITS * 4) + 32 + 1 + 1 + 1 + `NUM_REGS;
+    localparam DATAW   = `NUM_THREADS + 32 + `EX_BITS + `OP_BITS + `FRM_BITS + 1 + (`NR_BITS * 4) + 32 + 1 + 1 + `NUM_REGS;
     localparam SIZE    = `IBUF_SIZE;
     localparam SIZEW   = $clog2(SIZE+1);
     localparam ADDRW   = $clog2(SIZE);
     localparam NWARPSW = $clog2(`NUM_WARPS+1);
 
-    `USE_FAST_BRAM reg [DATAW-1:0] entries [`NUM_WARPS-1:0][SIZE-1:0];
-    reg [SIZEW-1:0] size_r [`NUM_WARPS-1:0];
-    reg [ADDRW:0] rd_ptr_r [`NUM_WARPS-1:0];
-    reg [ADDRW:0] wr_ptr_r [`NUM_WARPS-1:0];
-
+    reg [`NUM_WARPS-1:0][SIZEW-1:0] size_r;
+    
     wire [`NUM_WARPS-1:0] q_full;
     wire [`NUM_WARPS-1:0][SIZEW-1:0] q_size;
     wire [DATAW-1:0] q_data_in;
-    wire [`NUM_WARPS-1:0][DATAW-1:0] q_data_prev;
+    wire [`NUM_WARPS-1:0][DATAW-1:0] q_data_prev;    
     reg [`NUM_WARPS-1:0][DATAW-1:0] q_data_out;
 
     wire enq_fire = ibuf_enq_if.valid && ibuf_enq_if.ready;
@@ -39,41 +36,49 @@ module VX_ibuffer #(
         wire writing = enq_fire && (i == ibuf_enq_if.wid); 
         wire reading = deq_fire && (i == ibuf_deq_if.wid);
 
-        wire [ADDRW-1:0] rd_ptr_a = rd_ptr_r[i][ADDRW-1:0];
-        wire [ADDRW-1:0] wr_ptr_a = wr_ptr_r[i][ADDRW-1:0];
-        
+        wire is_slot0 = (0 == size_r[i]) || ((1 == size_r[i]) && reading);
+
+        wire push = writing && !is_slot0;
+        wire pop = reading && (size_r[i] != 1);
+
+        VX_generic_queue #(
+            .DATAW(DATAW),
+            .SIZE(SIZE),
+            .BUFFERED(1)
+        ) queue (
+            .clk      (clk),
+            .reset    (reset),
+            .push     (push),
+            .pop      (pop),
+            .data_in  (q_data_in),
+            .data_out (q_data_prev[i]),
+            `UNUSED_PIN (empty),
+            `UNUSED_PIN (full),
+            `UNUSED_PIN (size)
+        );
+
         always @(posedge clk) begin
             if (reset) begin
-                rd_ptr_r[i] <= 0;
-                wr_ptr_r[i] <= 0;
-                size_r[i]   <= 0;
-            end else begin
-                if (writing) begin    
-                    if ((0 == size_r[i]) || ((1 == size_r[i]) && reading)) begin
-                        q_data_out[i] <= q_data_in;
-                    end else begin
-                        entries[i][wr_ptr_a] <= q_data_in;
-                        wr_ptr_r[i] <= wr_ptr_r[i] + ADDRW'(1);
-                    end
-                    if (!reading) begin                                                       
-                        size_r[i] <= size_r[i] + SIZEW'(1);
-                    end
+                size_r[i] <= 0;
+            end else begin            
+                if (writing && !reading) begin                                                       
+                    size_r[i] <= size_r[i] + SIZEW'(1);
                 end
-                if (reading) begin
-                    if (size_r[i] != 1) begin
-                        q_data_out[i] <= q_data_prev[i];
-                        rd_ptr_r[i]   <= rd_ptr_r[i] + ADDRW'(1);
-                    end
-                    if (!writing) begin                                                        
-                        size_r[i] <= size_r[i] - SIZEW'(1);
-                    end
+                if (reading && !writing) begin                                                        
+                    size_r[i] <= size_r[i] - SIZEW'(1);
                 end
-            end                   
-        end  
+            end 
 
-        assign q_data_prev[i] = entries[i][rd_ptr_a];
-        assign q_full[i]      = (size_r[i] == SIZE);
-        assign q_size[i]      = size_r[i];
+            if (writing && is_slot0) begin                                                       
+                q_data_out[i] <= q_data_in;
+            end
+            if (reading && (size_r[i] != 1)) begin
+                q_data_out[i] <= q_data_prev[i];
+            end                  
+        end
+        
+        assign q_full[i] = (size_r[i] == SIZE);
+        assign q_size[i] = size_r[i];
     end
 
     ///////////////////////////////////////////////////////////////////////////
@@ -144,9 +149,9 @@ module VX_ibuffer #(
                 schedule_table[deq_wid_n] <= 0;
             end
 
-            deq_valid  <= deq_valid_n;
-            deq_wid    <= deq_wid_n;
-            deq_instr  <= deq_instr_n;                 
+            deq_valid <= deq_valid_n;
+            deq_wid   <= deq_wid_n;
+            deq_instr <= deq_instr_n;                 
 
             if (warp_added && !warp_removed) begin
                 num_warps <= num_warps + NWARPSW'(1);
@@ -164,9 +169,9 @@ module VX_ibuffer #(
                 for (integer i = 0; i < `NUM_WARPS; i++) begin
                     nw += 32'(q_size[i] != 0);
                 end
-                assert(nw == 32'(num_warps)) else $display("%t: error: invalid num_warps: nw=%0d, ref=%0d", $time, num_warps, nw);
-                assert(~deq_valid || (q_size[deq_wid] != 0)) else $display("%t: error: invalid schedule: wid=%0d", $time, deq_wid);
-                assert(~deq_fire || (q_size[deq_wid] != 0)) else $display("%t: error: invalid dequeu: wid=%0d", $time, deq_wid);
+                assert(nw == 32'(num_warps)) else $error("%t: error: invalid num_warps: nw=%0d, ref=%0d", $time, num_warps, nw);
+                assert(~deq_valid || (q_size[deq_wid] != 0)) else $error("%t: error: invalid schedule: wid=%0d", $time, deq_wid);
+                assert(~deq_fire || (q_size[deq_wid] != 0)) else $error("%t: error: invalid dequeu: wid=%0d", $time, deq_wid);
             end
         `endif
         end
@@ -187,8 +192,7 @@ module VX_ibuffer #(
                         ibuf_enq_if.rs3, 
                         ibuf_enq_if.imm, 
                         ibuf_enq_if.rs1_is_PC, 
-                        ibuf_enq_if.rs2_is_imm, 
-                        ibuf_enq_if.use_rs3, 
+                        ibuf_enq_if.rs2_is_imm,
                         ibuf_enq_if.used_regs};
 
     assign ibuf_deq_if.valid = deq_valid;
@@ -206,7 +210,6 @@ module VX_ibuffer #(
             ibuf_deq_if.imm, 
             ibuf_deq_if.rs1_is_PC, 
             ibuf_deq_if.rs2_is_imm, 
-            ibuf_deq_if.use_rs3, 
             ibuf_deq_if.used_regs} = deq_instr;
 
 endmodule

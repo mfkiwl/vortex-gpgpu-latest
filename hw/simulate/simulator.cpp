@@ -4,7 +4,7 @@
 #include <iomanip>
 
 #define ENABLE_DRAM_STALLS
-#define DRAM_LATENCY 4
+#define DRAM_LATENCY 100
 #define DRAM_RQ_SIZE 16
 #define DRAM_STALLS_MODULO 16
 
@@ -27,10 +27,6 @@ Simulator::Simulator() {
 
   ram_ = nullptr;
   vortex_ = new VVortex();
-
-  dram_rsp_active_ = false;
-  snp_req_active_ = false;
-  csr_req_active_ = false;
 
 #ifdef VCD_OUTPUT
   Verilated::traceEverOn(true);
@@ -61,32 +57,60 @@ void Simulator::attach_ram(RAM* ram) {
   dram_rsp_vec_.clear();
 }
 
-void Simulator::reset() {     
-#ifndef NDEBUG
-  std::cout << timestamp << ": [sim] reset()" << std::endl;
-#endif
+void Simulator::reset() { 
+  print_bufs_.clear();
+  dram_rsp_vec_.clear();
+
+  dram_rsp_active_ = false;
+  snp_req_active_ = false;
+  csr_req_active_ = false;
+
+  snp_req_size_ = 0;
+  pending_snp_reqs_ = 0;
+  csr_rsp_value_ = nullptr;
+
+  vortex_->dram_rsp_valid = 0;
+  vortex_->dram_req_ready = 0;
+  vortex_->io_req_ready = 0;
+  vortex_->io_rsp_valid = 0;
+  vortex_->snp_req_valid = 0;
+  vortex_->snp_rsp_ready = 0;  
+  vortex_->csr_io_req_valid  = 0;
+  vortex_->csr_io_rsp_ready  = 0;
 
   vortex_->reset = 1;
-  this->step();  
-  vortex_->reset = 0;
+  
+  vortex_->clk = 0;
+  this->eval();
+  vortex_->clk = 1;
+  this->eval();
 
-  dram_rsp_vec_.clear();
+  vortex_->reset = 0;
 
   // Turn on assertion after reset
   Verilated::assertOn(true);
 }
 
 void Simulator::step() {
+
   vortex_->clk = 0;
   this->eval();
 
+  dram_rsp_ready_   = vortex_->dram_rsp_ready;
+  snp_req_ready_    = vortex_->snp_req_ready;  
+  csr_io_req_ready_ = vortex_->csr_io_req_ready;
+  
   vortex_->clk = 1;
   this->eval();
-
+    
   this->eval_dram_bus();
   this->eval_io_bus();
   this->eval_csr_bus();
   this->eval_snp_bus();
+
+#ifndef NDEBUG
+  fflush(stdout);
+#endif
 }
 
 void Simulator::eval() {
@@ -103,30 +127,30 @@ void Simulator::eval_dram_bus() {
     return;
   }
 
-  // schedule DRAM responses
-  int dequeue_index = -1;
-  for (int i = 0; i < dram_rsp_vec_.size(); i++) {
-    if (dram_rsp_vec_[i].cycles_left > 0) {
-      dram_rsp_vec_[i].cycles_left -= 1;
-    }
-    if ((dequeue_index == -1) 
-     && (dram_rsp_vec_[i].cycles_left == 0)) {
-      dequeue_index = i;
-    }
+  // update DRAM responses schedule
+  for (auto& rsp : dram_rsp_vec_) {
+    if (rsp.cycles_left > 0)
+      rsp.cycles_left -= 1;
+  }
+
+  // schedule DRAM responses in FIFO order
+  std::list<dram_req_t>::iterator dram_rsp_it(dram_rsp_vec_.end());
+  if (!dram_rsp_vec_.empty() 
+   && (0 == dram_rsp_vec_.begin()->cycles_left)) {
+      dram_rsp_it = dram_rsp_vec_.begin();
   }
 
   // send DRAM response  
   if (dram_rsp_active_
-   && vortex_->dram_rsp_valid 
-   && vortex_->dram_rsp_ready) {
+   && vortex_->dram_rsp_valid && dram_rsp_ready_) {
     dram_rsp_active_ = false;
   }
   if (!dram_rsp_active_) {
-    if (dequeue_index != -1) {
+    if (dram_rsp_it != dram_rsp_vec_.end()) {
       vortex_->dram_rsp_valid = 1;
-      memcpy((uint8_t*)vortex_->dram_rsp_data, dram_rsp_vec_[dequeue_index].block.data(), GLOBAL_BLOCK_SIZE);
-      vortex_->dram_rsp_tag = dram_rsp_vec_[dequeue_index].tag;   
-      dram_rsp_vec_.erase(dram_rsp_vec_.begin() + dequeue_index);
+      memcpy((uint8_t*)vortex_->dram_rsp_data, dram_rsp_it->block.data(), GLOBAL_BLOCK_SIZE);
+      vortex_->dram_rsp_tag = dram_rsp_it->tag;   
+      dram_rsp_vec_.erase(dram_rsp_it);
       dram_rsp_active_ = true;
     } else {
       vortex_->dram_rsp_valid = 0;
@@ -157,16 +181,23 @@ void Simulator::eval_dram_bus() {
           }
         }
       } else {
-        dram_req_t dram_req;
-        dram_req.cycles_left = DRAM_LATENCY;     
-        dram_req.tag = vortex_->dram_req_tag;
+        dram_req_t dram_req;        
+        dram_req.tag  = vortex_->dram_req_tag;   
+        dram_req.addr = vortex_->dram_req_addr;
         ram_->read(vortex_->dram_req_addr * GLOBAL_BLOCK_SIZE, GLOBAL_BLOCK_SIZE, dram_req.block.data());
-        dram_rsp_vec_.push_back(dram_req);
+        dram_req.cycles_left = DRAM_LATENCY;
+        for (auto& rsp : dram_rsp_vec_) {
+          if (dram_req.addr == rsp.addr) {
+            dram_req.cycles_left = rsp.cycles_left;
+            break;
+          }
+        }     
+        dram_rsp_vec_.emplace_back(dram_req);
       } 
     }    
   }
 
-  vortex_->dram_req_ready = ~dram_stalled;
+  vortex_->dram_req_ready = !dram_stalled;
 }
 
 void Simulator::eval_io_bus() {
@@ -190,31 +221,32 @@ void Simulator::eval_io_bus() {
 }
 
 void Simulator::eval_snp_bus() {
-  if (snp_req_active_) {       
-    if (vortex_->snp_rsp_valid) {      
-      assert(pending_snp_reqs_ > 0);
-      --pending_snp_reqs_;
+  if (snp_req_active_) {      
+    if (vortex_->snp_req_valid && snp_req_ready_) {            
+      assert(snp_req_size_);
     #ifdef DBG_PRINT_CACHE_SNP
-      std::cout << timestamp << ": [sim] snp rsp: tag=" << vortex_->snp_rsp_tag << " pending=" << pending_snp_reqs_ << std::endl;
+      std::cout << std::dec << timestamp << ": [sim] SNP Req: addr=" << std::hex << vortex_->snp_req_addr << " tag=" << vortex_->snp_req_tag << " remain=" << (snp_req_size_-1) << std::endl;
     #endif
-    }
-    if (vortex_->snp_req_valid && vortex_->snp_req_ready) {            
-      if (snp_req_size_) {        
-        vortex_->snp_req_addr += 1;
-        vortex_->snp_req_tag  += 1;
-        --snp_req_size_;
-        ++pending_snp_reqs_;
-      #ifdef DBG_PRINT_CACHE_SNP
-        std::cout << timestamp << ": [sim] snp req: addr=" << std::hex << vortex_->snp_req_addr << std::dec << " tag=" << vortex_->snp_req_tag << " remain=" << snp_req_size_ << std::endl;
-      #endif
-      } else {
-        vortex_->snp_req_valid = 0;        
+      ++vortex_->snp_req_addr;
+      ++vortex_->snp_req_tag;
+      ++pending_snp_reqs_;
+      --snp_req_size_;
+      if (0 == snp_req_size_) {
+        vortex_->snp_req_valid = false;        
       }      
     }
-    if (!vortex_->snp_req_valid 
-     && 0 == pending_snp_reqs_) {
-      snp_req_active_ = false;
-    }  
+
+    if (vortex_->snp_rsp_valid && vortex_->snp_rsp_ready) {
+      assert(pending_snp_reqs_ > 0);
+      --pending_snp_reqs_;
+      if (!vortex_->snp_req_valid && 0 == pending_snp_reqs_) {
+        vortex_->snp_rsp_ready = false;
+        snp_req_active_ = false;
+      }
+    #ifdef DBG_PRINT_CACHE_SNP
+      std::cout << std::dec << timestamp << ": [sim] SNP Rsp: tag=" << std::hex << vortex_->snp_rsp_tag << " pending=" << pending_snp_reqs_ << std::endl;
+    #endif
+    }      
   } else {
     vortex_->snp_req_valid = 0;
     vortex_->snp_rsp_ready = 0;
@@ -223,18 +255,24 @@ void Simulator::eval_snp_bus() {
 
 void Simulator::eval_csr_bus() {
   if (csr_req_active_) { 
-    if (vortex_->csr_io_req_rw) {
-      if (vortex_->csr_io_req_ready) {
-        vortex_->snp_req_valid = 0;
-        csr_req_active_ = false;
-      }
-    } else { 
-      if (vortex_->csr_io_rsp_valid) {
-        *csr_rsp_value_ = vortex_->csr_io_rsp_data;
-        vortex_->snp_req_valid = 0;
-        vortex_->csr_io_rsp_ready = 0;
-        csr_req_active_ = false;
-      }
+    if (vortex_->csr_io_req_valid && csr_io_req_ready_) {
+    #ifndef NDEBUG
+      if (vortex_->csr_io_req_rw)
+        std::cout << std::dec << timestamp << ": [sim] CSR Wr Req: core=" << (int)vortex_->csr_io_req_coreid << ", addr=" << std::hex << vortex_->csr_io_req_addr << ", value=" << vortex_->csr_io_req_data << std::endl;
+      else
+        std::cout << std::dec << timestamp << ": [sim] CSR Rd Req: core=" << (int)vortex_->csr_io_req_coreid << ", addr=" << std::hex << vortex_->csr_io_req_addr << std::endl;
+    #endif
+      vortex_->csr_io_req_valid = 0;
+      if (vortex_->csr_io_req_rw)
+        csr_req_active_ = false;      
+    }
+    if (vortex_->csr_io_rsp_valid && vortex_->csr_io_rsp_ready) {
+      *csr_rsp_value_ = vortex_->csr_io_rsp_data;
+      vortex_->csr_io_rsp_ready = 0;
+      csr_req_active_ = false;
+    #ifndef NDEBUG
+      std::cout << std::dec << timestamp << ": [sim] CSR Rsp: value=" << vortex_->csr_io_rsp_data << std::endl;
+    #endif
     }
   } else {
     vortex_->csr_io_req_valid = 0;
@@ -261,33 +299,23 @@ bool Simulator::csr_req_active() const {
 }
 
 void Simulator::flush_caches(uint32_t mem_addr, uint32_t size) {  
-#ifndef NDEBUG
-  std::cout << timestamp << ": [sim] flush_caches()" << std::endl;
-#endif
   if (0 == size)
     return;
+
+  assert(!vortex_->snp_rsp_valid);
 
   vortex_->snp_req_addr  = mem_addr / GLOBAL_BLOCK_SIZE;
   vortex_->snp_req_tag   = 0;
   vortex_->snp_req_valid = 1;
   vortex_->snp_rsp_ready = 1;  
 
-  snp_req_size_   = (size + GLOBAL_BLOCK_SIZE - 1) / GLOBAL_BLOCK_SIZE; 
-  --snp_req_size_;
-  pending_snp_reqs_ = 1;
+  snp_req_size_ = (size + GLOBAL_BLOCK_SIZE - 1) / GLOBAL_BLOCK_SIZE;   
+  pending_snp_reqs_ = 0;
 
   snp_req_active_ = true;
-    
-  #ifdef DBG_PRINT_CACHE_SNP
-    std::cout << timestamp << ": [sim] snp req: addr=" << std::hex << vortex_->snp_req_addr << std::dec << " tag=" << vortex_->snp_req_tag << " remain=" << snp_req_size_ << std::endl;
-  #endif  
 }
 
 void Simulator::set_csr(int core_id, int addr, unsigned value) {
-#ifndef NDEBUG
-  std::cout << timestamp << ": [sim] set_csr()" << std::endl;
-#endif
-
   vortex_->csr_io_req_valid  = 1;
   vortex_->csr_io_req_coreid = core_id;
   vortex_->csr_io_req_addr   = addr;
@@ -299,10 +327,6 @@ void Simulator::set_csr(int core_id, int addr, unsigned value) {
 }
 
 void Simulator::get_csr(int core_id, int addr, unsigned *value) {
-#ifndef NDEBUG
-  std::cout << timestamp << ": [sim] get_csr()" << std::endl;
-#endif
-
   vortex_->csr_io_req_valid  = 1;
   vortex_->csr_io_req_coreid = core_id;
   vortex_->csr_io_req_addr   = addr;
@@ -310,12 +334,13 @@ void Simulator::get_csr(int core_id, int addr, unsigned *value) {
   vortex_->csr_io_rsp_ready  = 1;
 
   csr_rsp_value_ = value;
+
   csr_req_active_ = true;  
 }
 
 void Simulator::run() {
 #ifndef NDEBUG
-  std::cout << timestamp << ": [sim] run()" << std::endl;
+  std::cout << std::dec << timestamp << ": [sim] run()" << std::endl;
 #endif
 
   // execute program
@@ -329,11 +354,7 @@ void Simulator::run() {
 }
 
 int Simulator::get_last_wb_value(int reg) const {
-  #if (NUM_CLUSTERS != 1)
-    return (int)vortex_->Vortex->genblk2__DOT__genblk1__BRA__0__KET____DOT__cluster->genblk1__BRA__0__KET____DOT__core->pipeline->commit->writeback->last_wb_value[reg];    
-  #else
-    return (int)vortex_->Vortex->genblk1__DOT__cluster->genblk1__BRA__0__KET____DOT__core->pipeline->commit->writeback->last_wb_value[reg];
-  #endif
+  return (int)vortex_->Vortex->genblk1__BRA__0__KET____DOT__cluster->genblk1__BRA__0__KET____DOT__core->pipeline->commit->writeback->last_wb_value[reg];
 }
 
 void Simulator::load_bin(const char* program_file) {

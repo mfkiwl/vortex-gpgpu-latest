@@ -106,7 +106,7 @@ int main (int argc, char **argv) {
   size_t kernel_size;
   cl_int binary_status;
 
-  srand(time(NULL));
+  srand(50);
 
   // read kernel binary from file  
   if (0 != read_kernel_file("kernel.pocl", &kernel_bin, &kernel_size))
@@ -127,7 +127,7 @@ int main (int argc, char **argv) {
 
   printf("Create program from kernel source\n");
   program = CL_CHECK2(clCreateProgramWithBinary(
-    context, 1, &device_id, &kernel_size, &kernel_bin, &binary_status, &_err));
+    context, 1, &device_id, &kernel_size, (const uint8_t**)&kernel_bin, &binary_status, &_err));
   if (program == NULL) {
     cleanup();
     return -1;

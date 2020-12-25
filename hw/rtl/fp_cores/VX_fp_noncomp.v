@@ -4,14 +4,14 @@ module VX_fp_noncomp #(
     parameter TAGW = 1,
     parameter LANES = 1
 ) (
-	input wire clk,
-	input wire reset,   
+    input wire clk,
+    input wire reset,
 
     output wire ready_in,
     input wire  valid_in,
 
     input wire [TAGW-1:0] tag_in,
-	
+    
     input wire [`FPU_BITS-1:0] op_type,
     input wire [`FRM_BITS-1:0] frm,
 
@@ -38,6 +38,8 @@ module VX_fp_noncomp #(
                 SIG_NAN     = 32'h00000100,
                 QUT_NAN     = 32'h00000200;
 
+    reg valid_in_r;
+    reg [TAGW-1:0] tag_in_r;
     reg [`FPU_BITS-1:0] op_type_r;
     reg [`FRM_BITS-1:0] frm_r;
 
@@ -86,26 +88,28 @@ module VX_fp_noncomp #(
         wire tmp_ab_equal  = (dataa[i] == datab[i]) | (tmp_a_type[4] & tmp_b_type[4]);
 
         VX_generic_register #(
-            .N(1 + 1 + 8 + 23 + $bits(fp_type_t) + $bits(fp_type_t) + 1 + 1)
-        ) fnc1_reg (
-            .clk   (clk),
-            .reset (reset),
-            .stall (stall),
-            .flush (1'b0),
-            .in    ({tmp_a_sign, tmp_b_sign, tmp_a_exponent, tmp_a_mantissa, tmp_a_type, tmp_b_type, tmp_a_smaller, tmp_ab_equal}),
-            .out   ({a_sign[i],  b_sign[i],  a_exponent[i],  a_mantissa[i],  a_type[i],  b_type[i],  a_smaller[i],  ab_equal[i]})
+            .N(1 + 1 + 8 + 23 + $bits(fp_type_t) + $bits(fp_type_t) + 1 + 1),
+            .R(0)
+        ) pipe_reg0 (
+            .clk      (clk),
+            .reset    (reset),
+            .stall    (stall),
+            .flush    (1'b0),
+            .data_in  ({tmp_a_sign, tmp_b_sign, tmp_a_exponent, tmp_a_mantissa, tmp_a_type, tmp_b_type, tmp_a_smaller, tmp_ab_equal}),
+            .data_out ({a_sign[i],  b_sign[i],  a_exponent[i],  a_mantissa[i],  a_type[i],  b_type[i],  a_smaller[i],  ab_equal[i]})
         );
     end  
 
     VX_generic_register #(
-        .N(`FPU_BITS + `FRM_BITS + (2 * `NUM_THREADS * 32))
-    ) fnc2_reg (
-        .clk   (clk),
-        .reset (reset),
-        .stall (stall),
-        .flush (1'b0),
-        .in    ({op_type,   frm,   dataa,   datab}),
-        .out   ({op_type_r, frm_r, dataa_r, datab_r})
+        .N(1 + TAGW + `FPU_BITS + `FRM_BITS + (2 * `NUM_THREADS * 32)),
+        .R(1)
+    ) pipe_reg1 (
+        .clk      (clk),
+        .reset    (reset),
+        .stall    (stall),
+        .flush    (1'b0),
+        .data_in  ({valid_in,   tag_in,   op_type,   frm,   dataa,   datab}),
+        .data_out ({valid_in_r, tag_in_r, op_type_r, frm_r, dataa_r, datab_r})
     ); 
 
     // FCLASS
@@ -145,7 +149,7 @@ module VX_fp_noncomp #(
                 case (frm_r) // use LSB to distinguish MIN and MAX
                     3: fminmax_res[i] = a_smaller[i] ? dataa_r[i] : datab_r[i];
                     4: fminmax_res[i] = a_smaller[i] ? datab_r[i] : dataa_r[i];
-              default: fminmax_res[i] = 32'hdeadbeaf;  // don't care value
+              default: fminmax_res[i] = 'x;  // don't care value
                 endcase
             end
         end
@@ -155,10 +159,10 @@ module VX_fp_noncomp #(
     for (genvar i = 0; i < LANES; i++) begin
         always @(*) begin
             case (frm_r)
-                0:  fsgnj_res[i] = { b_sign[i], a_exponent[i], a_mantissa[i]};
+                0: fsgnj_res[i] = { b_sign[i], a_exponent[i], a_mantissa[i]};
                 1: fsgnj_res[i] = {~b_sign[i], a_exponent[i], a_mantissa[i]};
                 2: fsgnj_res[i] = { a_sign[i] ^ b_sign[i], a_exponent[i], a_mantissa[i]};
-          default: fsgnj_res[i] = 32'hdeadbeaf;  // don't care value
+          default: fsgnj_res[i] = 'x;  // don't care value
             endcase
         end
     end
@@ -190,8 +194,8 @@ module VX_fp_noncomp #(
                 `FRM_RDN: begin
                     if (a_type[i].is_nan || b_type[i].is_nan) begin
                         fcmp_res[i]  = 32'h0;        // result is 0 when either operand is NaN
-                        // ** FEQS only raise NV flag when either operand is signaling NaN
-                        fcmp_excp[i] = {(a_type[i].is_signaling | b_type[i].is_signaling), 4'h0};
+                        // FEQS only raise NV flag when either operand is signaling NaN
+                        fcmp_excp[i] = {(a_type[i].is_signaling | b_type[i].is_signaling), 4'h0}; 
                     end
                     else begin
                         fcmp_res[i] = {31'h0, ab_equal[i]};
@@ -199,7 +203,7 @@ module VX_fp_noncomp #(
                     end
                 end
                 default: begin
-                    fcmp_res[i] = 32'hdeadbeaf;  // don't care value
+                    fcmp_res[i]  = 'x;  // don't care value
                     fcmp_excp[i] = 5'h0;                        
                 end
             endcase
@@ -224,7 +228,7 @@ module VX_fp_noncomp #(
                 end      
                 //`FPU_MISC:
                 default: begin
-                    case (frm)
+                    case (frm_r)
                         0,1,2:  begin
                             tmp_result[i] = fsgnj_res[i];
                             {tmp_fflags[i].NV, tmp_fflags[i].DZ, tmp_fflags[i].OF, tmp_fflags[i].UF, tmp_fflags[i].NX} = 5'h0;
@@ -248,14 +252,15 @@ module VX_fp_noncomp #(
                        || (op_type_r == `FPU_CMP); // CMP
 
     VX_generic_register #(
-        .N(1 + TAGW + (LANES * 32) + 1 + (LANES * `FFG_BITS))
-    ) nc_reg (
-        .clk   (clk),
-        .reset (reset),
-        .stall (stall),
-        .flush (1'b0),
-        .in    ({valid_in,  tag_in,  tmp_result, tmp_has_fflags, tmp_fflags}),
-        .out   ({valid_out, tag_out, result,     has_fflags,     fflags})
+        .N(1 + TAGW + (LANES * 32) + 1 + (LANES * `FFG_BITS)),
+        .R(1)
+    ) pipe_reg2 (
+        .clk      (clk),
+        .reset    (reset),
+        .stall    (stall),
+        .flush    (1'b0),
+        .data_in  ({valid_in_r, tag_in_r, tmp_result, tmp_has_fflags, tmp_fflags}),
+        .data_out ({valid_out,  tag_out,  result,     has_fflags,     fflags})
     );
 
     assign ready_in = ~stall;

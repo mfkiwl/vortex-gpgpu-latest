@@ -7,10 +7,10 @@ module VX_mul_unit #(
     input wire reset,
     
     // Inputs
-    VX_mul_req_if       mul_req_if,
+    VX_mul_req_if   mul_req_if,
 
     // Outputs
-    VX_exu_to_cmt_if    mul_commit_if
+    VX_commit_if    mul_commit_if
 ); 
     localparam MULQ_BITS = `LOG2UP(`MULQ_SIZE);
 
@@ -34,7 +34,7 @@ module VX_mul_unit #(
     VX_cam_buffer #(
         .DATAW (`NW_BITS + `NUM_THREADS + 32 + `NR_BITS + 1),
         .SIZE  (`MULQ_SIZE)
-    ) mul_cam  (
+    ) req_metadata_buf  (
         .clk            (clk),
         .reset          (reset),
         .acquire_slot   (mulq_push),       
@@ -144,14 +144,15 @@ module VX_mul_unit #(
     wire [`NUM_THREADS-1:0][31:0] result = mul_valid_out ? mul_result : div_result;
 
     VX_generic_register #(
-        .N(1 + `NW_BITS + `NUM_THREADS + 32 + `NR_BITS + 1 + (`NUM_THREADS * 32))
-    ) mul_reg (
-        .clk   (clk),
-        .reset (reset),
-        .stall (stall_out),
-        .flush (1'b0),
-        .in    ({valid_out,           rsp_wid,           rsp_tmask,           rsp_PC,           rsp_rd,           rsp_wb,           result}),
-        .out   ({mul_commit_if.valid, mul_commit_if.wid, mul_commit_if.tmask, mul_commit_if.PC, mul_commit_if.rd, mul_commit_if.wb, mul_commit_if.data})
+        .N(1 + `NW_BITS + `NUM_THREADS + 32 + `NR_BITS + 1 + (`NUM_THREADS * 32)),
+        .R(1)
+    ) pipe_reg (
+        .clk      (clk),
+        .reset    (reset),
+        .stall    (stall_out),
+        .flush    (1'b0),
+        .data_in  ({valid_out,           rsp_wid,           rsp_tmask,           rsp_PC,           rsp_rd,           rsp_wb,           result}),
+        .data_out ({mul_commit_if.valid, mul_commit_if.wid, mul_commit_if.tmask, mul_commit_if.PC, mul_commit_if.rd, mul_commit_if.wb, mul_commit_if.data})
     );
 
     // can accept new request?

@@ -1,4 +1,3 @@
-
 `include "VX_platform.vh"
 
 module VX_ipdom_stack #(
@@ -17,33 +16,54 @@ module VX_ipdom_stack #(
 );
     localparam STACK_SIZE = 2 ** DEPTH;
 
-    `USE_FAST_BRAM reg [WIDTH-1:0] stack_1 [0:STACK_SIZE-1];
-    `USE_FAST_BRAM reg [WIDTH-1:0] stack_2 [0:STACK_SIZE-1];
-    `USE_FAST_BRAM reg             is_part [0:STACK_SIZE-1];
+    reg is_part [STACK_SIZE-1:0];
     
     reg [DEPTH-1:0] rd_ptr, wr_ptr;
 
+    wire [WIDTH - 1:0] d1, d2;
+
     always @(posedge clk) begin
         if (reset) begin   
+            rd_ptr <= 0;
             wr_ptr <= 0;
         end else begin
             if (push) begin
-                stack_1[wr_ptr] <= q1;
-                stack_2[wr_ptr] <= q2;
-                is_part[wr_ptr] <= 0;            
                 rd_ptr <= wr_ptr;
                 wr_ptr <= wr_ptr + DEPTH'(1);
             end else if (pop) begin            
                 wr_ptr <= wr_ptr - DEPTH'(is_part[rd_ptr]);
                 rd_ptr <= rd_ptr - DEPTH'(is_part[rd_ptr]);
-                is_part[rd_ptr] <= 1;
             end
         end
+    end    
+
+    VX_dp_ram #(
+        .DATAW(WIDTH * 2),
+        .SIZE(STACK_SIZE),
+        .BUFFERED(0),
+        .RWCHECK(0)
+    ) store (
+        .clk(clk),
+        .waddr(wr_ptr),                                
+        .raddr(rd_ptr),
+        .wren(push),
+        .byteen(1'b1),
+        .rden(1'b1),
+        .din({q2, q1}),
+        .dout({d2, d1})
+    );
+    
+    always @(posedge clk) begin
+        if (push) begin
+            is_part[wr_ptr] <= 0;   
+        end else if (pop) begin            
+            is_part[rd_ptr] <= 1;
+        end
     end
+    wire p = is_part[rd_ptr];
 
-    assign d = is_part[rd_ptr] ? stack_1[rd_ptr] : stack_2[rd_ptr];
-
-    assign empty = (0 == wr_ptr);
+    assign d     = p ? d1 : d2;
+    assign empty = ~(| wr_ptr);
     assign full  = ((STACK_SIZE-1) == wr_ptr);
 
 endmodule

@@ -90,15 +90,19 @@ vx_buffer_h dst_buf  = nullptr;
 
 static void show_usage() {
    std::cout << "Vortex Driver Test." << std::endl;
-   std::cout << "Usage: [-s:testid] [-e:testid] [-k: kernel] [-n words] [-c] [-h: help]" << std::endl;
+   std::cout << "Usage: [-t:testid] [-s:testid] [-e:testid] [-k: kernel] [-n words] [-c] [-h: help]" << std::endl;
 }
 
 static void parse_args(int argc, char **argv) {
   int c;
-  while ((c = getopt(argc, argv, "n:s:e:k:ch?")) != -1) {
+  while ((c = getopt(argc, argv, "n:t:s:e:k:ch?")) != -1) {
     switch (c) {
     case 'n':
       count = atoi(optarg);
+      break;
+    case 't':
+      testid_s = atoi(optarg);
+      testid_e = atoi(optarg);
       break;
     case 's':
       testid_s = atoi(optarg);
@@ -173,7 +177,7 @@ int main(int argc, char *argv[]) {
   size_t buf_size = num_points * sizeof(uint32_t);
   
   std::cout << "number of points: " << num_points << std::endl;
-  std::cout << "buffer size: " << std::hex << buf_size << std::dec <<  " bytes" << std::endl;
+  std::cout << "buffer size: " << buf_size << " bytes" << std::endl;
 
   // upload program
   std::cout << "upload kernel" << std::endl;  
@@ -256,7 +260,7 @@ int main(int argc, char *argv[]) {
                               (void*)vx_host_ptr(src1_buf), 
                               (void*)vx_host_ptr(src2_buf));
     if (errors != 0) {
-      std::cout << "found " << errors << " errors!" << std::endl;
+      std::cout << "found " << std::dec << errors << " errors!" << std::endl;
       std::cout << "Test" << t << "-" << name << " FAILED!" << std::endl << std::flush;
       if (stop_on_error) {
         cleanup();

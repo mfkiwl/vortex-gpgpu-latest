@@ -10,7 +10,7 @@ module VX_divide #(
     parameter LATENCY = 0
 ) (
     input wire clk,
-    input wire enable,
+    input wire enable, 
     input wire [WIDTHN-1:0] numer,
     input wire [WIDTHD-1:0] denom,
     output wire [WIDTHQ-1:0] quotient,
@@ -32,13 +32,13 @@ module VX_divide #(
     );
 
     defparam
-		divide.lpm_type = "LPM_DIVIDE",
-        divide.lpm_widthn = WIDTHN,        
-		divide.lpm_widthd = WIDTHD,		
-		divide.lpm_nrepresentation = NSIGNED ? "SIGNED" : "UNSIGNED",
+        divide.lpm_type     = "LPM_DIVIDE",
+        divide.lpm_widthn   = WIDTHN,        
+        divide.lpm_widthd   = WIDTHD,
+        divide.lpm_nrepresentation = NSIGNED ? "SIGNED" : "UNSIGNED",
         divide.lpm_drepresentation = DSIGNED ? "SIGNED" : "UNSIGNED",
-		divide.lpm_hint = "MAXIMIZE_SPEED=6,LPM_REMAINDERPOSITIVE=FALSE",
-		divide.lpm_pipeline = LATENCY;
+        divide.lpm_hint     = "MAXIMIZE_SPEED=6,LPM_REMAINDERPOSITIVE=FALSE",
+        divide.lpm_pipeline = LATENCY;
 
     assign quotient  = quotient_unqual [WIDTHQ-1:0];
     assign remainder = remainder_unqual [WIDTHR-1:0];
@@ -73,8 +73,8 @@ module VX_divide #(
         assign quotient  = quotient_unqual [WIDTHQ-1:0];
         assign remainder = remainder_unqual [WIDTHR-1:0];
     end else begin
-        reg [WIDTHN-1:0] quotient_pipe [0:LATENCY-1];
-        reg [WIDTHD-1:0] remainder_pipe [0:LATENCY-1];
+        reg [WIDTHN-1:0] quotient_pipe [LATENCY-1:0];
+        reg [WIDTHD-1:0] remainder_pipe [LATENCY-1:0];
 
         for (genvar i = 0; i < LATENCY; i++) begin
             always @(posedge clk) begin                

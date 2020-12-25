@@ -11,7 +11,7 @@ module VX_alu_unit #(
 
     // Outputs
     VX_branch_ctl_if    branch_ctl_if,
-    VX_exu_to_cmt_if    alu_commit_if    
+    VX_commit_if        alu_commit_if    
 );    
     reg [`NUM_THREADS-1:0][31:0] alu_result;    
     reg [`NUM_THREADS-1:0][31:0] add_result;   
@@ -29,9 +29,9 @@ module VX_alu_unit #(
     wire [`NUM_THREADS-1:0][31:0] alu_in1 = alu_req_if.rs1_data;
     wire [`NUM_THREADS-1:0][31:0] alu_in2 = alu_req_if.rs2_data;
 
-    wire [`NUM_THREADS-1:0][31:0] alu_in1_PC   = alu_req_if.rs1_is_PC  ? {`NUM_THREADS{alu_req_if.PC}} : alu_in1;
-    wire [`NUM_THREADS-1:0][31:0] alu_in2_imm  = alu_req_if.rs2_is_imm ? {`NUM_THREADS{alu_req_if.imm}}     : alu_in2;
-    wire [`NUM_THREADS-1:0][31:0] alu_in2_less = (alu_req_if.rs2_is_imm && ~is_br_op) ? {`NUM_THREADS{alu_req_if.imm}} : alu_in2;
+    wire [`NUM_THREADS-1:0][31:0] alu_in1_PC   = alu_req_if.rs1_is_PC ? {`NUM_THREADS{alu_req_if.PC}} : alu_in1;
+    wire [`NUM_THREADS-1:0][31:0] alu_in2_imm  = alu_req_if.rs2_is_imm ? {`NUM_THREADS{alu_req_if.imm}} : alu_in2;
+    wire [`NUM_THREADS-1:0][31:0] alu_in2_less = (alu_req_if.rs2_is_imm && !is_br_op) ? {`NUM_THREADS{alu_req_if.imm}} : alu_in2;
 
     for (genvar i = 0; i < `NUM_THREADS; i++) begin
         always @(*) begin
@@ -40,7 +40,7 @@ module VX_alu_unit #(
     end
 
     for (genvar i = 0; i < `NUM_THREADS; i++) begin
-        wire [32:0] sub_in1 = {alu_signed & alu_in1[i][31],      alu_in1[i]};
+        wire [32:0] sub_in1 = {alu_signed & alu_in1[i][31], alu_in1[i]};
         wire [32:0] sub_in2 = {alu_signed & alu_in2_less[i][31], alu_in2_less[i]};
         always @(*) begin
             sub_result[i] = $signed(sub_in1) - $signed(sub_in2);
@@ -97,14 +97,15 @@ module VX_alu_unit #(
     wire stall_out = ~alu_commit_if.ready && alu_commit_if.valid;
 
     VX_generic_register #(
-        .N(1 + `NW_BITS + `NUM_THREADS + 32 + `NR_BITS + 1 + (`NUM_THREADS * 32) + 1 + `BR_BITS + 32 + 33)
-    ) alu_reg (
-        .clk   (clk),
-        .reset (reset),
-        .stall (stall_out),
-        .flush (1'b0),
-        .in    ({alu_req_if.valid,    alu_req_if.wid,    alu_req_if.tmask,    alu_req_if.PC,    alu_req_if.rd,    alu_req_if.wb,    alu_jal_result,     is_br_op,   br_op,   br_dest,            cmp_result}),
-        .out   ({alu_commit_if.valid, alu_commit_if.wid, alu_commit_if.tmask, alu_commit_if.PC, alu_commit_if.rd, alu_commit_if.wb, alu_commit_if.data, is_br_op_r, br_op_r, branch_ctl_if.dest, cmp_result_r})
+        .N(1 + `NW_BITS + `NUM_THREADS + 32 + `NR_BITS + 1 + (`NUM_THREADS * 32) + 1 + `BR_BITS + 32 + 33),
+        .R(1)
+    ) pipe_reg (
+        .clk      (clk),
+        .reset    (reset),
+        .stall    (stall_out),
+        .flush    (1'b0),
+        .data_in  ({alu_req_if.valid,    alu_req_if.wid,    alu_req_if.tmask,    alu_req_if.PC,    alu_req_if.rd,    alu_req_if.wb,    alu_jal_result,     is_br_op,   br_op,   br_dest,            cmp_result}),
+        .data_out ({alu_commit_if.valid, alu_commit_if.wid, alu_commit_if.tmask, alu_commit_if.PC, alu_commit_if.rd, alu_commit_if.wb, alu_commit_if.data, is_br_op_r, br_op_r, branch_ctl_if.dest, cmp_result_r})
     );
     
     wire is_less  = cmp_result_r[32];

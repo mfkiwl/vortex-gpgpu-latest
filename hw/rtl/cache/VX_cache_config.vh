@@ -2,21 +2,20 @@
 `define VX_CACHE_CONFIG
 
 `include "VX_platform.vh"
-`include "VX_scope.vh"
 
-`ifdef DBG_CORE_REQ_INFO
+`ifdef DBG_CACHE_REQ_INFO
 `include "VX_define.vh"
 `endif
 
-`define REQ_TAG_WIDTH           `MAX(CORE_TAG_WIDTH, SNP_REQ_TAG_WIDTH)
+`define REQ_TAG_WIDTH           `MAX(CORE_TAG_WIDTH, SNP_TAG_WIDTH)
 
-`define REQS_BITS               `LOG2UP(NUM_REQUESTS)
+`define REQS_BITS               `LOG2UP(NUM_REQS)
 
 //                               tag              rw   byteen      tid
 `define REQ_INST_META_WIDTH     (`REQ_TAG_WIDTH + 1  + WORD_SIZE + `REQS_BITS)
 
-//                                data         metadata               word_sel                  is_snp  snp_invalidate 
-`define MRVQ_METADATA_WIDTH     (`WORD_WIDTH + `REQ_INST_META_WIDTH + `UP(`WORD_SELECT_WIDTH) + 1     + 1)
+//                                data         metadata               word_sel                  is_snp  snp_inv 
+`define MSHR_DATA_WIDTH     (`WORD_WIDTH + `REQ_INST_META_WIDTH + `UP(`WORD_SELECT_WIDTH) + 1     + 1)
 
 `define BANK_BITS               `LOG2UP(NUM_BANKS)
 
@@ -71,7 +70,7 @@
 
 ///////////////////////////////////////////////////////////////////////////////
 
-`define CORE_REQ_TAG_COUNT      ((CORE_TAG_ID_BITS != 0) ? 1 : NUM_REQUESTS)
+`define CORE_REQ_TAG_COUNT      ((CORE_TAG_ID_BITS != 0) ? 1 : NUM_REQS)
 
 `define DRAM_ADDR_BANK(x)       x[`BANK_SELECT_BITS-1:0]
 
@@ -81,6 +80,6 @@
 
 `define LINE_TO_BYTE_ADDR(x, i) {x, (32-$bits(x))'(i << (32-$bits(x)-`BANK_SELECT_BITS))}
 
-`define DRAM_TO_BYTE_ADDR(x)    {x, (32-$bits(x))'(0)}
+`define TO_FULL_ADDR(x)         {x, (32-$bits(x))'(0)}
 
 `endif

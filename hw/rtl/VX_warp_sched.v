@@ -29,8 +29,8 @@ module VX_warp_sched #(
     // Lock warp until instruction decode to resolve branches
     reg [`NUM_WARPS-1:0] fetch_lock;
 
-    reg [`NUM_THREADS-1:0] thread_masks[`NUM_WARPS-1:0];
-    reg [31:0] warp_pcs[`NUM_WARPS-1:0];
+    reg [`NUM_THREADS-1:0] thread_masks [`NUM_WARPS-1:0];
+    reg [31:0] warp_pcs [`NUM_WARPS-1:0];
 
     // barriers
     reg [`NUM_WARPS-1:0] barrier_stall_mask[`NUM_BARRIERS-1:0]; // warps waiting on barrier
@@ -180,11 +180,11 @@ module VX_warp_sched #(
 
     // split/join stack management
 
-    wire [(1+32+`NUM_THREADS-1):0] ipdom[`NUM_WARPS-1:0];
+    wire [(1+32+`NUM_THREADS-1):0] ipdom [`NUM_WARPS-1:0];
     wire [(1+32+`NUM_THREADS-1):0] q1 = {1'b1, 32'b0,                thread_masks[warp_ctl_if.wid]};
     wire [(1+32+`NUM_THREADS-1):0] q2 = {1'b0, warp_ctl_if.split.pc, warp_ctl_if.split.else_mask};
 
-    assign {join_fall, join_pc, join_tm} = ipdom[join_if.wid];
+    assign {join_fall, join_pc, join_tm} = ipdom [join_if.wid];
 
     for (genvar i = 0; i < `NUM_WARPS; i++) begin
         wire push = warp_ctl_if.valid 
@@ -195,16 +195,16 @@ module VX_warp_sched #(
         wire pop = join_if.valid && (i == join_if.wid);
 
         VX_ipdom_stack #(
-            .WIDTH(1+32+`NUM_THREADS), 
-            .DEPTH(`NT_BITS+1)
+            .WIDTH (1+32+`NUM_THREADS), 
+            .DEPTH (2 ** (`NT_BITS+1))
         ) ipdom_stack (
-            .clk  (clk),
-            .reset(reset),
-            .push (push),
-            .pop  (pop),
-            .q1   (q1),
-            .q2   (q2),
-            .d    (ipdom[i]),
+            .clk   (clk),
+            .reset (reset),
+            .push  (push),
+            .pop   (pop),
+            .q1    (q1),
+            .q2    (q2),
+            .d     (ipdom[i]),
             `UNUSED_PIN (empty),
             `UNUSED_PIN (full)
         );
@@ -237,14 +237,13 @@ module VX_warp_sched #(
 
     assign scheduled_warp = schedule_valid && ~stall_out;
 
-    VX_generic_register #( 
-        .N(1 + `NUM_THREADS + 32 + `NW_BITS),
-        .R(1)
+    VX_pipe_register #( 
+        .DATAW  (1 + `NUM_THREADS + 32 + `NW_BITS),
+        .RESETW (1)
     ) pipe_reg (
         .clk      (clk),
         .reset    (reset),
-        .stall    (stall_out),
-        .flush    (1'b0),
+        .enable   (!stall_out),
         .data_in  ({scheduled_warp,      thread_mask,         warp_pc,          warp_to_schedule}),
         .data_out ({ifetch_req_if.valid, ifetch_req_if.tmask, ifetch_req_if.PC, ifetch_req_if.wid})
     );

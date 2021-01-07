@@ -1,20 +1,20 @@
 `include "VX_platform.vh"
 
 module VX_priority_encoder #( 
-    parameter N    = 1,
-    parameter LOGN = `LOG2UP(N)
+    parameter DATAW  = 1,
+    parameter LDATAW = `LOG2UP(DATAW)
 ) (
-    input  wire [N-1:0]    data_in,
-    output wire [LOGN-1:0] data_out,
-    output wire            valid_out
+    input  wire [DATAW-1:0]  data_in,
+    output wire [LDATAW-1:0] data_out,
+    output wire              valid_out
 );    
-    reg [`LOG2UP(N)-1:0] data_out_r;
+    reg [LDATAW-1:0] data_out_r;
 
     always @(*) begin
         data_out_r = 'x;
-        for (integer i = 0; i < N; i++) begin
+        for (integer i = 0; i < DATAW; i++) begin
             if (data_in[i]) begin
-                data_out_r = LOGN'(i);
+                data_out_r = LDATAW'(i);
                 break;
             end
         end

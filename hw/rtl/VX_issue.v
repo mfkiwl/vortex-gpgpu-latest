@@ -27,8 +27,8 @@ module VX_issue #(
     VX_gpr_req_if gpr_req_if();
     VX_gpr_rsp_if gpr_rsp_if();
 
-    wire scoreboard_delay;
     wire [`NW_BITS-1:0] deq_wid_next;
+    wire scoreboard_delay;
 
     VX_ibuffer #(
         .CORE_ID(CORE_ID)
@@ -37,8 +37,8 @@ module VX_issue #(
         .reset        (reset), 
         .freeze       (1'b0),
         .ibuf_enq_if  (decode_if),
-        .deq_wid_next (deq_wid_next),
-        .ibuf_deq_if  (ibuf_deq_if)      
+        .ibuf_deq_if  (ibuf_deq_if),
+        .deq_wid_next (deq_wid_next)    
     );
 
     VX_scoreboard #(
@@ -49,7 +49,6 @@ module VX_issue #(
         .ibuf_deq_if  (ibuf_deq_if),
         .writeback_if (writeback_if),
         .deq_wid_next (deq_wid_next),
-        .exe_delay    (~execute_if.ready),
         .delay        (scoreboard_delay)
     );
         
@@ -93,7 +92,10 @@ module VX_issue #(
         .mul_req_if (mul_req_if),
         .fpu_req_if (fpu_req_if),
         .gpu_req_if (gpu_req_if)
-    );      
+    );     
+
+    // issue the instruction
+    assign ibuf_deq_if.ready = !scoreboard_delay && execute_if.ready;     
 
     `SCOPE_ASSIGN (issue_fire,        ibuf_deq_if.valid && ibuf_deq_if.ready);
     `SCOPE_ASSIGN (issue_wid,         ibuf_deq_if.wid);
@@ -110,33 +112,91 @@ module VX_issue #(
     `SCOPE_ASSIGN (issue_imm,         ibuf_deq_if.imm);
     `SCOPE_ASSIGN (issue_rs1_is_pc,   ibuf_deq_if.rs1_is_PC);
     `SCOPE_ASSIGN (issue_rs2_is_imm,  ibuf_deq_if.rs2_is_imm);
-    
     `SCOPE_ASSIGN (scoreboard_delay,  scoreboard_delay); 
-    `SCOPE_ASSIGN (execute_delay,     ~execute_if.ready);     
- 
+    `SCOPE_ASSIGN (execute_delay,     ~execute_if.ready);    
     `SCOPE_ASSIGN (gpr_rsp_a,         gpr_rsp_if.rs1_data);
     `SCOPE_ASSIGN (gpr_rsp_b,         gpr_rsp_if.rs2_data);
     `SCOPE_ASSIGN (gpr_rsp_c,         gpr_rsp_if.rs3_data);
-            
     `SCOPE_ASSIGN (writeback_valid,   writeback_if.valid);    
+    `SCOPE_ASSIGN (writeback_tmask,   writeback_if.tmask);
     `SCOPE_ASSIGN (writeback_wid,     writeback_if.wid);
     `SCOPE_ASSIGN (writeback_pc,      writeback_if.PC);  
     `SCOPE_ASSIGN (writeback_rd,      writeback_if.rd);
     `SCOPE_ASSIGN (writeback_data,    writeback_if.data);
+    `SCOPE_ASSIGN (writeback_eop,     writeback_if.eop);
 
 `ifdef PERF_ENABLE
-    reg [63:0] perf_scoreboard_stalls;
+    reg [63:0] perf_ibf_stalls;
+    reg [63:0] perf_scb_stalls;
+    reg [63:0] perf_alu_stalls;
+    reg [63:0] perf_lsu_stalls;
+    reg [63:0] perf_csr_stalls;
+    reg [63:0] perf_gpu_stalls;
+`ifdef EXT_M_ENABLE
+    reg [63:0] perf_mul_stalls;
+`endif
+`ifdef EXT_F_ENABLE
+    reg [63:0] perf_fpu_stalls;
+`endif
+
     always @(posedge clk) begin
         if (reset) begin
-            perf_scoreboard_stalls <= 0;
+            perf_ibf_stalls <= 0;
+            perf_scb_stalls <= 0;
+            perf_alu_stalls <= 0;
+            perf_lsu_stalls <= 0;
+            perf_csr_stalls <= 0;
+            perf_gpu_stalls <= 0;
+        `ifdef EXT_M_ENABLE
+            perf_mul_stalls <= 0;
+        `endif
+        `ifdef EXT_F_ENABLE
+            perf_fpu_stalls <= 0;
+        `endif
         end else begin
-            // scoreboard_stall
-            if (ibuf_deq_if.valid & scoreboard_delay) begin 
-                perf_scoreboard_stalls <= perf_scoreboard_stalls + 64'd1;
+            if (decode_if.valid & !decode_if.ready) begin
+                perf_ibf_stalls  <= perf_ibf_stalls  + 64'd1;
             end
+            if (ibuf_deq_if.valid & scoreboard_delay) begin 
+                perf_scb_stalls  <= perf_scb_stalls  + 64'd1;
+            end
+            if (alu_req_if.valid & !alu_req_if.ready) begin
+                perf_alu_stalls <= perf_alu_stalls + 64'd1;
+            end
+            if (lsu_req_if.valid & !lsu_req_if.ready) begin
+                perf_lsu_stalls <= perf_lsu_stalls + 64'd1;
+            end
+            if (csr_req_if.valid & !csr_req_if.ready) begin
+                perf_csr_stalls <= perf_csr_stalls + 64'd1;
+            end
+            if (gpu_req_if.valid & !gpu_req_if.ready) begin
+                perf_gpu_stalls <= perf_gpu_stalls + 64'd1;
+            end
+        `ifdef EXT_M_ENABLE
+            if (mul_req_if.valid & !mul_req_if.ready) begin
+                perf_mul_stalls <= perf_mul_stalls + 64'd1;
+            end
+        `endif
+        `ifdef EXT_F_ENABLE
+            if (fpu_req_if.valid & !fpu_req_if.ready) begin
+                perf_fpu_stalls <= perf_fpu_stalls + 64'd1;
+            end
+        `endif
         end
     end
-    assign perf_pipeline_if.scoreboard_stalls = perf_scoreboard_stalls;
+    
+    assign perf_pipeline_if.ibf_stalls = perf_ibf_stalls;
+    assign perf_pipeline_if.scb_stalls = perf_scb_stalls; 
+    assign perf_pipeline_if.alu_stalls = perf_alu_stalls;
+    assign perf_pipeline_if.lsu_stalls = perf_lsu_stalls;
+    assign perf_pipeline_if.csr_stalls = perf_csr_stalls;
+    assign perf_pipeline_if.gpu_stalls = perf_gpu_stalls;
+`ifdef EXT_M_ENABLE
+    assign perf_pipeline_if.mul_stalls = perf_mul_stalls;
+`endif
+`ifdef EXT_F_ENABLE
+    assign perf_pipeline_if.fpu_stalls = perf_fpu_stalls;
+`endif
 `endif
 
 `ifdef DBG_PRINT_PIPELINE

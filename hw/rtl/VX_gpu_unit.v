@@ -75,17 +75,18 @@ module VX_gpu_unit #(
     
     wire stall = ~gpu_commit_if.ready && gpu_commit_if.valid;
 
-    VX_generic_register #(
-        .N(1 + `NW_BITS + `NUM_THREADS + 32 + `NR_BITS + 1 + `GPU_TMC_SIZE + `GPU_WSPAWN_SIZE + `GPU_SPLIT_SIZE + `GPU_BARRIER_SIZE),
-        .R(1)
+    VX_pipe_register #(
+        .DATAW  (1 + `NW_BITS + `NUM_THREADS + 32 + `NR_BITS + 1 + `GPU_TMC_SIZE + `GPU_WSPAWN_SIZE + `GPU_SPLIT_SIZE + `GPU_BARRIER_SIZE),
+        .RESETW (1)
     ) pipe_reg (
         .clk      (clk),
         .reset    (reset),
-        .stall    (stall),
-        .flush    (1'b0),
+        .enable   (!stall),
         .data_in  ({gpu_req_if.valid,    gpu_req_if.wid,    gpu_req_if.tmask,    gpu_req_if.PC,    gpu_req_if.rd,    gpu_req_if.wb,    tmc,             wspawn,             split,             barrier}),
         .data_out ({gpu_commit_if.valid, gpu_commit_if.wid, gpu_commit_if.tmask, gpu_commit_if.PC, gpu_commit_if.rd, gpu_commit_if.wb, warp_ctl_if.tmc, warp_ctl_if.wspawn, warp_ctl_if.split, warp_ctl_if.barrier})
     );  
+
+    assign gpu_commit_if.eop = 1'b1;
 
     assign warp_ctl_if.valid = gpu_commit_if.valid && gpu_commit_if.ready;
     assign warp_ctl_if.wid   = gpu_commit_if.wid;
@@ -99,7 +100,6 @@ module VX_gpu_unit #(
     `SCOPE_ASSIGN (gpu_req_op_type, gpu_req_if.op_type);
     `SCOPE_ASSIGN (gpu_req_rs1, gpu_req_if.rs1_data[0]); 
     `SCOPE_ASSIGN (gpu_req_rs2, gpu_req_if.rs2_data);
-
     `SCOPE_ASSIGN (gpu_rsp_valid, warp_ctl_if.valid);
     `SCOPE_ASSIGN (gpu_rsp_wid, warp_ctl_if.wid);
     `SCOPE_ASSIGN (gpu_rsp_tmc, warp_ctl_if.tmc);

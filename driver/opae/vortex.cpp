@@ -22,10 +22,6 @@
 #include "vx_scope.h"
 #endif
 
-#define CACHE_BLOCK_SIZE 64
-#define ALLOC_BASE_ADDR  0x10000000
-#define LOCAL_MEM_SIZE   0xffffffff
-
 #define CHECK_RES(_expr)                                \
    do {                                                 \
      fpga_result res = _expr;                           \
@@ -41,7 +37,6 @@
 #define CMD_MEM_READ        AFU_IMAGE_CMD_MEM_READ
 #define CMD_MEM_WRITE       AFU_IMAGE_CMD_MEM_WRITE
 #define CMD_RUN             AFU_IMAGE_CMD_RUN
-#define CMD_CLFLUSH         AFU_IMAGE_CMD_CLFLUSH
 #define CMD_CSR_READ        AFU_IMAGE_CMD_CSR_READ
 #define CMD_CSR_WRITE       AFU_IMAGE_CMD_CSR_WRITE
 
@@ -105,7 +100,7 @@ extern int vx_dev_caps(vx_device_h hdevice, unsigned caps_id, unsigned *value) {
     case VX_CAPS_MAX_THREADS:
         *value = device->num_threads;
         break;
-    case VX_CAPS_CACHE_LINESIZE:
+    case VX_CAPS_CACHE_LINE_SIZE:
         *value = CACHE_BLOCK_SIZE;
         break;
     case VX_CAPS_LOCAL_MEM_SIZE:
@@ -457,36 +452,6 @@ extern int vx_copy_from_dev(vx_buffer_h hbuffer, size_t dev_maddr, size_t size, 
 
     // Wait for the write operation to finish
     if (vx_ready_wait(buffer->hdevice, -1) != 0)
-        return -1;
-
-    return 0;
-}
-
-extern int vx_flush_caches(vx_device_h hdevice, size_t dev_maddr, size_t size) {
-    if (nullptr == hdevice 
-     || 0 >= size)
-        return -1;
-
-    vx_device_t* device = ((vx_device_t*)hdevice);
-
-    size_t asize = align_size(size, CACHE_BLOCK_SIZE);  
-
-    // check alignment
-    if (!is_aligned(dev_maddr, CACHE_BLOCK_SIZE))
-        return -1;
-
-    // Ensure ready for new command
-    if (vx_ready_wait(hdevice, -1) != 0)
-        return -1;
-
-    auto ls_shift = (int)std::log2(CACHE_BLOCK_SIZE);
-
-    CHECK_RES(fpgaWriteMMIO64(device->fpga, 0, MMIO_MEM_ADDR, dev_maddr >> ls_shift));
-    CHECK_RES(fpgaWriteMMIO64(device->fpga, 0, MMIO_DATA_SIZE, asize >> ls_shift));   
-    CHECK_RES(fpgaWriteMMIO64(device->fpga, 0, MMIO_CMD_TYPE, CMD_CLFLUSH));
-
-    // Wait for the write operation to finish
-    if (vx_ready_wait(hdevice, -1) != 0)
         return -1;
 
     return 0;

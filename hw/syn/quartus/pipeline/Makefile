@@ -1,7 +1,7 @@
 PROJECT = VX_pipeline
 TOP_LEVEL_ENTITY = VX_pipeline
 SRC_FILE = VX_pipeline.v
-FPU_INCLUDE = ../../../rtl/fp_cores;../../../rtl/fp_cores/altera;../../../rtl/fp_cores/fpnew/src;../../../rtl/fp_cores/fpnew/src/fpu_div_sqrt_mvp/hdl;../../../rtl/fp_cores/fpnew/src/common_cells/include;../../../rtl/fp_cores/fpnew/src/common_cells/src
+FPU_INCLUDE = ../../../rtl/fp_cores;../../../rtl/fp_cores/altera/arria10;../../../rtl/fp_cores/fpnew/src;../../../rtl/fp_cores/fpnew/src/fpu_div_sqrt_mvp/hdl;../../../rtl/fp_cores/fpnew/src/common_cells/include;../../../rtl/fp_cores/fpnew/src/common_cells/src
 RTL_INCLUDE = $(FPU_INCLUDE);../../../rtl;../../../rtl/libs;../../../rtl/interfaces
 PROJECT_FILES = $(PROJECT).qpf $(PROJECT).qsf
 
@@ -65,8 +65,11 @@ sta.chg:
 asm.chg:
 	$(STAMP) asm.chg
 
+timing: $(PROJECT_FILES)
+	quartus_sh -t ../timing-html.tcl -project $(PROJECT)
+
 program: $(PROJECT).sof
 	quartus_pgm --no_banner --mode=jtag -o "$(PROJECT).sof"
-	
+
 clean:
 	rm -rf bin *.rpt *.chg *.qsf *.qpf *.qws *.log *.htm *.eqn *.pin *.sof *.pof qdb incremental_db tmp-clearbox

@@ -3,13 +3,15 @@
 #include <fstream>
 #include <iomanip>
 
-#define CCI_LATENCY 8
+#define CCI_LATENCY  8
 #define CCI_RAND_MOD 8
 #define CCI_RQ_SIZE 16
 #define CCI_WQ_SIZE 16
 
+#define RESET_DELAY 4
+
 #define ENABLE_DRAM_STALLS
-#define DRAM_LATENCY 100
+#define DRAM_LATENCY 24
 #define DRAM_RQ_SIZE 16
 #define DRAM_STALLS_MODULO 16
 
@@ -36,8 +38,10 @@ opae_sim::opae_sim() {
   trace_->open("trace.vcd");
 #endif
 
+  // reset the device
   this->reset();
 
+  // launch execution thread
   stop_ = false;
   future_ = std::async(std::launch::async, [&]{                   
       while (!stop_) {
@@ -131,10 +135,12 @@ void opae_sim::reset() {
 
   vortex_afu_->reset = 1;
 
-  vortex_afu_->clk = 0;
-  this->eval();
-  vortex_afu_->clk = 1;
-  this->eval();
+  for (int i = 0; i < RESET_DELAY; ++i) {
+    vortex_afu_->clk = 0;
+    this->eval();
+    vortex_afu_->clk = 1;
+    this->eval();
+  }  
 
   vortex_afu_->reset = 0;
   
@@ -204,11 +210,11 @@ void opae_sim::sRxPort_bus() {
   if (!mmio_req_enabled 
    && (cci_rd_it != cci_reads_.end())) {
     vortex_afu_->vcp2af_sRxPort_c0_rspValid = 1;
-    memcpy(vortex_afu_->vcp2af_sRxPort_c0_data, cci_rd_it->block.data(), CACHE_BLOCK_SIZE);
+    memcpy(vortex_afu_->vcp2af_sRxPort_c0_data, cci_rd_it->data.data(), CACHE_BLOCK_SIZE);
     vortex_afu_->vcp2af_sRxPort_c0_hdr_mdata = cci_rd_it->mdata;    
     /*printf("%0ld: [sim] CCI Rd Rsp: addr=%ld, mdata=%d, data=", timestamp, cci_rd_it->addr, cci_rd_it->mdata);
     for (int i = 0; i < CACHE_BLOCK_SIZE; ++i)
-      printf("%02x", cci_rd_it->block[CACHE_BLOCK_SIZE-1-i]);
+      printf("%02x", cci_rd_it->data[CACHE_BLOCK_SIZE-1-i]);
     printf("\n");*/
     cci_reads_.erase(cci_rd_it);
   }
@@ -223,7 +229,7 @@ void opae_sim::sTxPort_bus() {
     cci_req.addr = vortex_afu_->af2cp_sTxPort_c0_hdr_address;
     cci_req.mdata = vortex_afu_->af2cp_sTxPort_c0_hdr_mdata;
     auto host_ptr = (uint64_t*)(vortex_afu_->af2cp_sTxPort_c0_hdr_address * CACHE_BLOCK_SIZE);
-    memcpy(cci_req.block.data(), host_ptr, CACHE_BLOCK_SIZE);
+    memcpy(cci_req.data.data(), host_ptr, CACHE_BLOCK_SIZE);
     //printf("%0ld: [sim] CCI Rd Req: addr=%ld, mdata=%d\n", timestamp, vortex_afu_->af2cp_sTxPort_c0_hdr_address, cci_req.mdata);
     cci_reads_.emplace_back(cci_req);    
   }
@@ -262,7 +268,7 @@ void opae_sim::avs_bus() {
   vortex_afu_->avs_readdatavalid = 0;  
   if (dram_rd_it != dram_reads_.end()) {
     vortex_afu_->avs_readdatavalid = 1;
-    memcpy(vortex_afu_->avs_readdata, dram_rd_it->block.data(), CACHE_BLOCK_SIZE);
+    memcpy(vortex_afu_->avs_readdata, dram_rd_it->data.data(), CACHE_BLOCK_SIZE);
     uint32_t addr = dram_rd_it->addr;
     dram_reads_.erase(dram_rd_it);
     /*printf("%0ld: [sim] DRAM Rd Rsp: addr=%x, pending={", timestamp, addr * CACHE_BLOCK_SIZE);
@@ -304,7 +310,7 @@ void opae_sim::avs_bus() {
       assert(0 == vortex_afu_->mem_bank_select);
       dram_rd_req_t dram_req;      
       dram_req.addr = vortex_afu_->avs_address;
-      ram_.read(vortex_afu_->avs_address * CACHE_BLOCK_SIZE, CACHE_BLOCK_SIZE, dram_req.block.data());      
+      ram_.read(vortex_afu_->avs_address * CACHE_BLOCK_SIZE, CACHE_BLOCK_SIZE, dram_req.data.data());      
       dram_req.cycles_left = DRAM_LATENCY;
       for (auto& rsp : dram_reads_) {
         if (dram_req.addr == rsp.addr) {

@@ -17,10 +17,14 @@ typedef void* vx_buffer_h;
 #define VX_CAPS_MAX_CORES         0x1
 #define VX_CAPS_MAX_WARPS         0x2
 #define VX_CAPS_MAX_THREADS       0x3
-#define VX_CAPS_CACHE_LINESIZE    0x4
+#define VX_CAPS_CACHE_LINE_SIZE   0x4
 #define VX_CAPS_LOCAL_MEM_SIZE    0x5
 #define VX_CAPS_ALLOC_BASE_ADDR   0x6
 #define VX_CAPS_KERNEL_BASE_ADDR  0x7
+
+#define CACHE_BLOCK_SIZE 64
+#define ALLOC_BASE_ADDR  0x00000000
+#define LOCAL_MEM_SIZE   0xffffffff
 
 // open the device and connect to it
 int vx_dev_open(vx_device_h* hdevice);
@@ -42,9 +46,6 @@ int vx_buf_release(vx_buffer_h hbuffer);
 
 // allocate device memory and return address
 int vx_alloc_dev_mem(vx_device_h hdevice, size_t size, size_t* dev_maddr);
-
-// Copy bytes from device local memory to buffer
-int vx_flush_caches(vx_device_h hdevice, size_t dev_maddr, size_t size);
 
 // Copy bytes from buffer to device local memory
 int vx_copy_to_dev(vx_buffer_h hbuffer, size_t dev_maddr, size_t size, size_t src_offset);

@@ -11,10 +11,6 @@
 #include <ram.h>
 #include <simulator.h>
 
-#define CACHE_LINESIZE  64
-#define ALLOC_BASE_ADDR 0x10000000
-#define LOCAL_MEM_SIZE  0xffffffff
-
 ///////////////////////////////////////////////////////////////////////////////
 
 inline size_t align_size(size_t size, size_t alignment) {        
@@ -31,7 +27,7 @@ public:
     vx_buffer(size_t size, vx_device* device) 
         : size_(size)
         , device_(device) {
-        auto aligned_asize = align_size(size, CACHE_LINESIZE);
+        auto aligned_asize = align_size(size, CACHE_BLOCK_SIZE);
         data_ = malloc(aligned_asize);
     }
 
@@ -75,7 +71,7 @@ public:
 
     int alloc_local_mem(size_t size, size_t* dev_maddr) {
         auto dev_mem_size = LOCAL_MEM_SIZE;
-        size_t asize = align_size(size, CACHE_LINESIZE);        
+        size_t asize = align_size(size, CACHE_BLOCK_SIZE);        
         if (mem_allocation_ + asize > dev_mem_size)
             return -1;
         *dev_maddr = mem_allocation_;
@@ -84,7 +80,7 @@ public:
     }
 
     int upload(void* src, size_t dest_addr, size_t size, size_t src_offset) {
-        size_t asize = align_size(size, CACHE_LINESIZE);
+        size_t asize = align_size(size, CACHE_BLOCK_SIZE);
         if (dest_addr + asize > ram_.size())
             return -1;
 
@@ -98,7 +94,7 @@ public:
     }
 
     int download(const void* dest, size_t src_addr, size_t size, size_t dest_offset) {
-        size_t asize = align_size(size, CACHE_LINESIZE);
+        size_t asize = align_size(size, CACHE_BLOCK_SIZE);
         if (src_addr + asize > ram_.size())
             return -1;
 
@@ -137,19 +133,6 @@ public:
              || 0 == timeout_sec--)
                 break;
         }
-        return 0;
-    }
-
-    int flush_caches(size_t dev_maddr, size_t size) {
-        if (future_.valid()) {
-            future_.wait(); // ensure prior run completed
-        }        
-        simulator_.attach_ram(&ram_);
-        simulator_.flush_caches(dev_maddr, size);        
-        while (simulator_.snp_req_active()) {
-            simulator_.step();
-        };
-        simulator_.attach_ram(NULL);
         return 0;
     }
 
@@ -202,8 +185,8 @@ extern int vx_dev_caps(vx_device_h hdevice, unsigned caps_id, unsigned *value) {
     case VX_CAPS_MAX_THREADS:
         *value = NUM_THREADS;
         break;
-    case VX_CAPS_CACHE_LINESIZE:
-        *value = CACHE_LINESIZE;
+    case VX_CAPS_CACHE_LINE_SIZE:
+        *value = CACHE_BLOCK_SIZE;
         break;
     case VX_CAPS_LOCAL_MEM_SIZE:
         *value = 0xffffffff;
@@ -255,16 +238,6 @@ extern int vx_alloc_dev_mem(vx_device_h hdevice, size_t size, size_t* dev_maddr)
 
     vx_device *device = ((vx_device*)hdevice);
     return device->alloc_local_mem(size, dev_maddr);
-}
-
-extern int vx_flush_caches(vx_device_h hdevice, size_t dev_maddr, size_t size) {
-    if (nullptr == hdevice 
-     || 0 >= size)
-        return -1;
-
-    vx_device *device = ((vx_device*)hdevice);
-
-    return device->flush_caches(dev_maddr, size);
 }
 
 

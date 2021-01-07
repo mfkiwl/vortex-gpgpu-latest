@@ -28,15 +28,14 @@ module VX_icache_stage #(
     VX_dp_ram #(
         .DATAW(32 + `NUM_THREADS),
         .SIZE(`NUM_WARPS),
-        .BUFFERED(0),
-        .RWCHECK(0)
+        .FASTRAM(1)
     ) req_metadata (
         .clk(clk),
         .waddr(req_tag),                                
         .raddr(rsp_tag),
         .wren(icache_req_fire),
         .byteen(1'b1),
-        .rden(1'b1),
+        .rden(ifetch_rsp_if.valid),
         .din({ifetch_req_if.PC,  ifetch_req_if.tmask}),
         .dout({ifetch_rsp_if.PC, ifetch_rsp_if.tmask})
     );
@@ -52,7 +51,7 @@ module VX_icache_stage #(
     assign ifetch_req_if.ready = icache_req_if.ready;
 
 `ifdef DBG_CACHE_REQ_INFO  
-    assign icache_req_if.tag = {ifetch_req_if.PC, `NR_BITS'(0), ifetch_req_if.wid, req_tag};
+    assign icache_req_if.tag = {ifetch_req_if.PC, ifetch_req_if.wid, req_tag};
 `else
     assign icache_req_if.tag = req_tag;
 `endif
@@ -68,7 +67,6 @@ module VX_icache_stage #(
     `SCOPE_ASSIGN (icache_req_wid,  ifetch_req_if.wid);
     `SCOPE_ASSIGN (icache_req_addr, {icache_req_if.addr, 2'b0});    
     `SCOPE_ASSIGN (icache_req_tag,  req_tag);
-
     `SCOPE_ASSIGN (icache_rsp_fire, icache_rsp_if.valid && icache_rsp_if.ready);
     `SCOPE_ASSIGN (icache_rsp_data, icache_rsp_if.data[0]);
     `SCOPE_ASSIGN (icache_rsp_tag,  rsp_tag);

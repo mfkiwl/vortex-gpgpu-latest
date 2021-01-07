@@ -37,6 +37,8 @@ module vortex_afu #(
   output logic [$clog2(NUM_LOCAL_MEM_BANKS)-1:0] mem_bank_select
 );
 
+localparam RESET_DELAY        = 3;  
+
 localparam DRAM_ADDR_WIDTH    = $bits(t_local_mem_addr);
 localparam DRAM_LINE_WIDTH    = $bits(t_local_mem_data);
 localparam DRAM_LINE_LW       = $clog2(DRAM_LINE_WIDTH);
@@ -57,7 +59,6 @@ localparam AFU_ID_H           = 16'h0004;      // AFU ID Higher
 localparam CMD_MEM_READ       = `AFU_IMAGE_CMD_MEM_READ;
 localparam CMD_MEM_WRITE      = `AFU_IMAGE_CMD_MEM_WRITE;
 localparam CMD_RUN            = `AFU_IMAGE_CMD_RUN;
-localparam CMD_CLFLUSH        = `AFU_IMAGE_CMD_CLFLUSH;
 localparam CMD_CSR_READ       = `AFU_IMAGE_CMD_CSR_READ;
 localparam CMD_CSR_WRITE      = `AFU_IMAGE_CMD_CSR_WRITE;
 
@@ -83,10 +84,9 @@ localparam STATE_READ         = 1;
 localparam STATE_WRITE        = 2;
 localparam STATE_START        = 3;
 localparam STATE_RUN          = 4;
-localparam STATE_CLFLUSH      = 5;
-localparam STATE_CSR_READ     = 6;
-localparam STATE_CSR_WRITE    = 7;
-localparam STATE_MAX_VALUE    = 8;
+localparam STATE_CSR_READ     = 5;
+localparam STATE_CSR_WRITE    = 6;
+localparam STATE_MAX_VALUE    = 7;
 localparam STATE_WIDTH        = $clog2(STATE_MAX_VALUE);
 
 `ifdef SCOPE
@@ -111,18 +111,6 @@ wire vx_dram_rsp_valid;
 wire [`VX_DRAM_LINE_WIDTH-1:0] vx_dram_rsp_data;
 wire [`VX_DRAM_TAG_WIDTH-1:0]  vx_dram_rsp_tag;
 wire vx_dram_rsp_ready;
-
-reg vx_snp_req_valid;
-reg [`VX_DRAM_ADDR_WIDTH-1:0] vx_snp_req_addr;
-wire vx_snp_req_inv = 0;
-wire [`VX_SNP_TAG_WIDTH-1:0] vx_snp_req_tag;
-wire vx_snp_req_ready;
-
-wire vx_snp_rsp_valid;
-`DEBUG_BEGIN
-wire [`VX_SNP_TAG_WIDTH-1:0] vx_snp_rsp_tag;
-`DEBUG_END
-reg vx_snp_rsp_ready;
 
 wire        vx_csr_io_req_valid;
 wire [`VX_CSR_ID_WIDTH-1:0] vx_csr_io_req_coreid;
@@ -197,24 +185,34 @@ wire [2:0] cmd_type = (cp2af_sRxPort.c0.mmioWrValid && (MMIO_CMD_TYPE == mmio_hd
 reg scope_start;
 `endif
 
-// disable assertions until reset
+// disable assertions until full reset
 `ifndef VERILATOR
+reg [$clog2(RESET_DELAY+1)-1:0] reset_ctr;
 initial begin
   $assertoff;  
+end
+always @(posedge clk) begin
+  if (reset) begin
+    reset_ctr <= 0;
+  end else begin
+    reset_ctr <= reset_ctr + 1;
+    if (reset_ctr == RESET_DELAY) begin
+      $asserton; // enable assertions
+    end
+  end
 end
 `endif
 
 always @(posedge clk) begin
   if (reset) begin
-  `ifndef VERILATOR
-    $asserton; // enable assertions
-  `endif
     mmio_tx.mmioRdValid <= 0;
     mmio_tx.hdr         <= 0;
   `ifdef SCOPE
     scope_start         <= 0;
   `endif
   end else begin
+
+
     mmio_tx.mmioRdValid <= cp2af_sRxPort.c0.mmioRdValid; 
     mmio_tx.hdr.tid     <= mmio_hdr.tid;
   `ifdef SCOPE
@@ -335,9 +333,17 @@ end
 
 wire cmd_read_done;
 wire cmd_write_done;
-wire cmd_clflush_done;
 wire cmd_csr_done;
 wire cmd_run_done;
+
+reg [$clog2(RESET_DELAY+1)-1:0] vx_reset_ctr;
+always @(posedge clk) begin
+  if (state == STATE_IDLE) begin
+    vx_reset_ctr <= 0;
+  end else if (state == STATE_START) begin
+    vx_reset_ctr <= vx_reset_ctr + 1;
+  end
+end
 
 always @(posedge clk) begin
   if (reset) begin
@@ -370,12 +376,6 @@ always @(posedge clk) begin
             vx_reset   <= 1;
             vx_enabled <= 1;
             state <= STATE_START;                    
-          end
-          CMD_CLFLUSH: begin
-          `ifdef DBG_PRINT_OPAE
-            $display("%t: STATE CFLUSH: addr=%0h size=%0d", $time, cmd_mem_addr, cmd_data_size);
-          `endif
-            state <= STATE_CLFLUSH;
           end
           CMD_CSR_READ: begin
           `ifdef DBG_PRINT_OPAE
@@ -413,21 +413,14 @@ always @(posedge clk) begin
         end
       end
 
-      STATE_START: begin // vortex reset cycle
-        state <= STATE_RUN;
+      STATE_START: begin 
+        // vortex reset cycles
+        if (vx_reset_ctr == $bits(vx_reset_ctr)'(RESET_DELAY))
+          state <= STATE_RUN;
       end
 
       STATE_RUN: begin
         if (cmd_run_done) begin
-          state <= STATE_IDLE;
-        `ifdef DBG_PRINT_OPAE
-          $display("%t: STATE IDLE", $time);
-        `endif
-        end
-      end
-
-      STATE_CLFLUSH: begin
-        if (cmd_clflush_done) begin
           state <= STATE_IDLE;
         `ifdef DBG_PRINT_OPAE
           $display("%t: STATE IDLE", $time);
@@ -700,8 +693,8 @@ always @(posedge clk) begin
     end
 
     cci_rd_req_enable <= (STATE_WRITE == state)                       
-                      && (cci_rd_req_ctr_next < cmd_data_size)
-                      && (cci_pending_reads_next < CCI_RD_QUEUE_SIZE)
+                      && (cci_rd_req_ctr_next != cmd_data_size)
+                      && (cci_pending_reads_next != CCI_RD_QUEUE_SIZE)
                       && !cp2af_sRxPort.c0TxAlmFull;    
 
     if (cci_rd_req_fire) begin  
@@ -740,15 +733,16 @@ always @(posedge clk) begin
   end
 end
 
-VX_generic_queue #(
-  .DATAW(CCI_RD_RQ_DATAW),
-  .SIZE(CCI_RD_QUEUE_SIZE)
+VX_fifo_queue #(
+  .DATAW   (CCI_RD_RQ_DATAW),
+  .SIZE    (CCI_RD_QUEUE_SIZE),
+  .FASTRAM (1)  
 ) cci_rd_req_queue (
   .clk      (clk),
   .reset    (reset),
   .push     (cci_rdq_push),
-  .data_in  (cci_rdq_din),
   .pop      (cci_rdq_pop),
+  .data_in  (cci_rdq_din),
   .data_out (cci_rdq_dout),
   .empty    (cci_rdq_empty),
   `UNUSED_PIN (full),
@@ -853,80 +847,6 @@ begin
   end
 end
 
-// Vortex cache snooping //////////////////////////////////////////////////////
-
-wire [`VX_DRAM_ADDR_WIDTH-1:0] snp_req_size;
-wire [`VX_DRAM_ADDR_WIDTH-1:0] snp_req_baseaddr;
-reg [`VX_DRAM_ADDR_WIDTH-1:0] snp_req_ctr, snp_rsp_ctr;
-wire [`VX_DRAM_ADDR_WIDTH-1:0] snp_req_ctr_next, snp_rsp_ctr_next;
-
-wire vx_snp_req_fire, vx_snp_rsp_fire;
-
-if (`VX_DRAM_LINE_WIDTH != DRAM_LINE_WIDTH) begin
-  assign snp_req_baseaddr = {cmd_mem_addr, (`VX_DRAM_ADDR_WIDTH - DRAM_ADDR_WIDTH)'(0)};
-  assign snp_req_size     = {cmd_data_size, (`VX_DRAM_ADDR_WIDTH - DRAM_ADDR_WIDTH)'(0)};
-end else begin
-  assign snp_req_baseaddr = cmd_mem_addr;
-  assign snp_req_size     = cmd_data_size;
-end
-
-assign vx_snp_req_tag = (`VX_SNP_TAG_WIDTH)'(snp_req_ctr);
-
-assign vx_snp_req_fire  = vx_snp_req_valid && vx_snp_req_ready;
-assign vx_snp_rsp_fire  = vx_snp_rsp_valid && vx_snp_rsp_ready;
-
-assign snp_req_ctr_next = vx_snp_req_fire ? (snp_req_ctr + `VX_DRAM_ADDR_WIDTH'(1)) : snp_req_ctr;
-assign snp_rsp_ctr_next = vx_snp_rsp_fire ? (snp_rsp_ctr - `VX_DRAM_ADDR_WIDTH'(1)) : snp_rsp_ctr;
-
-assign cmd_clflush_done = (0 == snp_rsp_ctr);  
-
-always @(posedge clk) begin
-  if (reset) begin
-    vx_snp_req_valid <= 0;
-    vx_snp_req_addr  <= 0;
-    vx_snp_rsp_ready <= 0;
-    snp_req_ctr      <= 0;
-    snp_rsp_ctr      <= 0;
-  end else begin
-    if ((STATE_IDLE == state) 
-    &&  (CMD_CLFLUSH == cmd_type)) begin
-      vx_snp_req_valid <= (snp_req_size != 0);
-      vx_snp_req_addr  <= snp_req_baseaddr;
-      vx_snp_rsp_ready <= (snp_req_size != 0);
-      snp_req_ctr      <= 0;
-      snp_rsp_ctr      <= snp_req_size; 
-    end
-
-    if ((STATE_CLFLUSH == state) 
-     && (snp_req_ctr_next >= snp_req_size)) begin
-       vx_snp_req_valid <= 0;
-    end
-
-    if ((STATE_CLFLUSH == state) 
-     && (0 == snp_rsp_ctr_next)) begin
-       vx_snp_rsp_ready <= 0;
-    end
-
-    if (vx_snp_req_fire) begin
-      assert(snp_req_ctr < snp_req_size);
-      vx_snp_req_addr <= vx_snp_req_addr + `VX_DRAM_ADDR_WIDTH'(1);
-      snp_req_ctr     <= snp_req_ctr_next;
-    `ifdef DBG_PRINT_OPAE
-      $display("%t: AFU Snp Req: addr=%0h, tag=%0h, rem=%0d", $time, `TO_FULL_ADDR(vx_snp_req_addr), (`VX_SNP_TAG_WIDTH)'(vx_snp_req_tag), (snp_req_size - snp_req_ctr_next));
-    `endif
-    end
-
-    if ((STATE_CLFLUSH == state) 
-     && vx_snp_rsp_fire) begin
-       assert(snp_rsp_ctr != 0);
-       snp_rsp_ctr <= snp_rsp_ctr_next;
-    `ifdef DBG_PRINT_OPAE
-      $display("%t: AFU Snp Rsp: tag=%0h, rem=%0d", $time, vx_snp_rsp_tag, snp_rsp_ctr_next);
-    `endif
-    end
-  end
-end
-
 // CSRs ///////////////////////////////////////////////////////////////////////
 
 reg csr_io_req_sent;
@@ -968,67 +888,40 @@ assign cmd_run_done = !vx_busy;
 Vortex #() vortex (
   `SCOPE_BIND_afu_vortex
 
-  .clk              (clk),
-  .reset            (reset | vx_reset),
+  .clk            (clk),
+  .reset          (reset | vx_reset),
 
   // DRAM request 
-  .dram_req_valid   (vx_dram_req_valid),
-  .dram_req_rw      (vx_dram_req_rw),
-  .dram_req_byteen  (vx_dram_req_byteen),
-  .dram_req_addr    (vx_dram_req_addr),
-  .dram_req_data    (vx_dram_req_data),
-  .dram_req_tag     (vx_dram_req_tag),
-  .dram_req_ready   (vx_dram_req_ready),
+  .dram_req_valid (vx_dram_req_valid),
+  .dram_req_rw    (vx_dram_req_rw),
+  .dram_req_byteen(vx_dram_req_byteen),
+  .dram_req_addr  (vx_dram_req_addr),
+  .dram_req_data  (vx_dram_req_data),
+  .dram_req_tag   (vx_dram_req_tag),
+  .dram_req_ready (vx_dram_req_ready),
 
   // DRAM response  
-  .dram_rsp_valid   (vx_dram_rsp_valid),
-  .dram_rsp_data    (vx_dram_rsp_data),
-  .dram_rsp_tag     (vx_dram_rsp_tag),
-  .dram_rsp_ready   (vx_dram_rsp_ready),
+  .dram_rsp_valid (vx_dram_rsp_valid),
+  .dram_rsp_data  (vx_dram_rsp_data),
+  .dram_rsp_tag   (vx_dram_rsp_tag),
+  .dram_rsp_ready (vx_dram_rsp_ready),
 
-  // Snoop request
-  .snp_req_valid    (vx_snp_req_valid),
-  .snp_req_addr     (vx_snp_req_addr),
-  .snp_req_inv      (vx_snp_req_inv),
-  .snp_req_tag      (vx_snp_req_tag),
-  .snp_req_ready    (vx_snp_req_ready),
+  // CSR Request
+  .csr_req_valid  (vx_csr_io_req_valid),
+  .csr_req_coreid (vx_csr_io_req_coreid),
+  .csr_req_addr   (vx_csr_io_req_addr),
+  .csr_req_rw     (vx_csr_io_req_rw),
+  .csr_req_data   (vx_csr_io_req_data),
+  .csr_req_ready  (vx_csr_io_req_ready),
 
-  // Snoop response
-  .snp_rsp_valid    (vx_snp_rsp_valid),
-  .snp_rsp_tag      (vx_snp_rsp_tag),
-  .snp_rsp_ready    (vx_snp_rsp_ready),
-
-  // I/O request
-  `UNUSED_PIN       (io_req_valid),
-  `UNUSED_PIN       (io_req_rw),
-  `UNUSED_PIN       (io_req_byteen),   
-  `UNUSED_PIN       (io_req_addr),
-  `UNUSED_PIN       (io_req_data),
-  `UNUSED_PIN       (io_req_tag),    
-  .io_req_ready     (1'b1),
-
-  // I/O response
-  .io_rsp_valid     (1'b0),
-  .io_rsp_data      (0),
-  .io_rsp_tag       (0),
-  `UNUSED_PIN       (io_rsp_ready),
-
-  // CSR I/O Request
-  .csr_io_req_valid (vx_csr_io_req_valid),
-  .csr_io_req_coreid(vx_csr_io_req_coreid),
-  .csr_io_req_addr  (vx_csr_io_req_addr),
-  .csr_io_req_rw    (vx_csr_io_req_rw),
-  .csr_io_req_data  (vx_csr_io_req_data),
-  .csr_io_req_ready (vx_csr_io_req_ready),
-
-  // CSR I/O Response
-  .csr_io_rsp_valid (vx_csr_io_rsp_valid),
-  .csr_io_rsp_data  (vx_csr_io_rsp_data),
-  .csr_io_rsp_ready (vx_csr_io_rsp_ready),
+  // CSR Response
+  .csr_rsp_valid  (vx_csr_io_rsp_valid),
+  .csr_rsp_data   (vx_csr_io_rsp_data),
+  .csr_rsp_ready  (vx_csr_io_rsp_ready),
  
   // status
-  .busy             (vx_busy),
-  `UNUSED_PIN       (ebreak)
+  .busy           (vx_busy),
+  `UNUSED_PIN     (ebreak)
 );
 
 // SCOPE //////////////////////////////////////////////////////////////////////
@@ -1063,8 +956,6 @@ Vortex #() vortex (
 `SCOPE_ASSIGN (ccip_rd_req_ctr, cci_rd_req_ctr);
 `SCOPE_ASSIGN (ccip_rd_rsp_ctr, cci_rd_rsp_ctr);
 `SCOPE_ASSIGN (ccip_wr_req_ctr, cci_wr_req_ctr);
-`SCOPE_ASSIGN (snp_req_ctr, snp_req_ctr);
-`SCOPE_ASSIGN (snp_rsp_ctr, snp_rsp_ctr);
 
 wire scope_changed = `SCOPE_TRIGGER;
 

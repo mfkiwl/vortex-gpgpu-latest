@@ -1,9 +1,5 @@
 `include "VX_define.vh"
 
-`ifndef SYNTHESIS
-`include "float_dpi.vh"
-`endif
-
 module VX_fp_div #( 
     parameter TAGW = 1,
     parameter LANES = 1
@@ -16,9 +12,14 @@ module VX_fp_div #(
 
     input wire [TAGW-1:0] tag_in,
 
+    input wire [`FRM_BITS-1:0] frm,
+    
     input wire [LANES-1:0][31:0]  dataa,
     input wire [LANES-1:0][31:0]  datab,
-    output wire [LANES-1:0][31:0] result, 
+    output wire [LANES-1:0][31:0] result,  
+
+    output wire has_fflags,
+    output fflags_t [LANES-1:0] fflags,
 
     output wire [TAGW-1:0] tag_out,
 
@@ -27,39 +28,42 @@ module VX_fp_div #(
 );    
     wire stall = ~ready_out && valid_out;
     wire enable = ~stall;
+
+    wire _reset;   
+
+    VX_reset_relay reset_relay (
+        .clk       (clk),
+        .reset     (reset),
+        .reset_out (_reset)
+    );
     
     for (genvar i = 0; i < LANES; i++) begin
-    `ifdef QUARTUS
         acl_fdiv fdiv (
             .clk    (clk),
-            .areset (reset),
+            .areset (_reset),
             .en     (enable),
             .a      (dataa[i]),
             .b      (datab[i]),
             .q      (result[i])
         );
-    `else 
-        integer fdiv_h;
-        initial begin
-            fdiv_h = dpi_register();
-        end
-        always @(posedge clk) begin
-           dpi_fdiv(fdiv_h, enable, dataa[i], datab[i], result[i]);
-        end
-    `endif
     end
 
     VX_shift_register #(
-        .DATAW(1 + TAGW),
-        .DEPTH(`LATENCY_FDIV)
+        .DATAW  (1 + TAGW),
+        .DEPTH  (`LATENCY_FDIV),
+        .RESETW (1)
     ) shift_reg (
-        .clk(clk),
-        .reset(reset),
-        .enable(enable),
-        .in ({valid_in,  tag_in}),
-        .out({valid_out, tag_out})
+        .clk      (clk),
+        .reset    (reset),
+        .enable   (enable),
+        .data_in  ({valid_in,  tag_in}),
+        .data_out ({valid_out, tag_out})
     );
 
     assign ready_in = enable;
+
+    `UNUSED_VAR (frm)
+    assign has_fflags = 0;
+    assign fflags = 0;
 
 endmodule

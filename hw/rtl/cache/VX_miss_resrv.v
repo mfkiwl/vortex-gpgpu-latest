@@ -5,7 +5,7 @@ module VX_miss_resrv #(
     parameter BANK_ID                       = 0, 
     
     // Size of line inside a bank in bytes
-    parameter BANK_LINE_SIZE                = 1, 
+    parameter CACHE_LINE_SIZE               = 1, 
     // Number of banks
     parameter NUM_BANKS                     = 1, 
     // Size of a word in bytes
@@ -16,8 +16,6 @@ module VX_miss_resrv #(
     parameter MSHR_SIZE                     = 1, 
     // core request tag size
     parameter CORE_TAG_WIDTH                = 1,
-    // Snooping request tag width
-    parameter SNP_TAG_WIDTH                 = 1,
     // size of tag id in core request tag
     parameter CORE_TAG_ID_BITS              = 0    
 ) (
@@ -26,158 +24,201 @@ module VX_miss_resrv #(
 
 `ifdef DBG_CACHE_REQ_INFO
 `IGNORE_WARNINGS_BEGIN
-    input wire[31:0]                    debug_pc_st0,
-    input wire[`NR_BITS-1:0]            debug_rd_st0,
-    input wire[`NW_BITS-1:0]            debug_wid_st0,
-    input wire[`UP(CORE_TAG_ID_BITS)-1:0] debug_tagid_st0,
-    input wire[31:0]                    debug_pc_st3,
-    input wire[`NR_BITS-1:0]            debug_rd_st3,
-    input wire[`NW_BITS-1:0]            debug_wid_st3,
-    input wire[`UP(CORE_TAG_ID_BITS)-1:0] debug_tagid_st3,
+    input wire[31:0]                    deq_debug_pc,
+    input wire[`NW_BITS-1:0]            deq_debug_wid,
+    input wire[31:0]                    enq_debug_pc,
+    input wire[`NW_BITS-1:0]            enq_debug_wid,
 `IGNORE_WARNINGS_END
 `endif
 
     // enqueue
-    input wire                          enqueue_st3,    
-    input wire[`LINE_ADDR_WIDTH-1:0]    enqueue_addr_st3,
-    input wire[`UP(`WORD_SELECT_WIDTH)-1:0] enqueue_wsel_st3,
-    input wire[`WORD_WIDTH-1:0]         enqueue_data_st3,
-    input wire[`REQS_BITS-1:0]          enqueue_tid_st3,
-    input wire[`REQ_TAG_WIDTH-1:0]      enqueue_tag_st3,
-    input wire                          enqueue_rw_st3,
-    input wire[WORD_SIZE-1:0]           enqueue_byteen_st3,    
-    input wire                          enqueue_is_snp_st3,
-    input wire                          enqueue_snp_inv_st3,
-    input wire                          enqueue_is_mshr_st3,
-    input wire                          enqueue_ready_st3,
-    output wire                         enqueue_full,
+    input wire                          enqueue,    
+    input wire [`LINE_ADDR_WIDTH-1:0]   enqueue_addr,
+    input wire [`MSHR_DATA_WIDTH-1:0]   enqueue_data,
+    input wire                          enqueue_is_mshr,
+    input wire                          enqueue_ready,
 
-    // fill
-    input wire                          update_ready_st0,    
-    input wire[`LINE_ADDR_WIDTH-1:0]    addr_st0,
-    output wire                         pending_hazard_st0,
+    // lookup
+    input wire                          lookup_ready,    
+    input wire [`LINE_ADDR_WIDTH-1:0]   lookup_addr,
+    output wire                         lookup_match,
+
+    // schedule
+    input wire                          schedule,
+    output wire                         schedule_valid,
+    output wire [`LINE_ADDR_WIDTH-1:0]  schedule_addr,
+    output wire [`MSHR_DATA_WIDTH-1:0]  schedule_data,
+    output wire                         schedule_valid_next,
+    output wire [`LINE_ADDR_WIDTH-1:0]  schedule_addr_next,
+    output wire [`MSHR_DATA_WIDTH-1:0]  schedule_data_next,
 
     // dequeue
-    input wire                          schedule_st0,
-    output wire                         dequeue_valid_st0,
-    output wire[`LINE_ADDR_WIDTH-1:0]   dequeue_addr_st0,
-    output wire[`UP(`WORD_SELECT_WIDTH)-1:0] dequeue_wsel_st0,
-    output wire[`WORD_WIDTH-1:0]        dequeue_data_st0,
-    output wire[`REQS_BITS-1:0]         dequeue_tid_st0,
-    output wire[`REQ_TAG_WIDTH-1:0]     dequeue_tag_st0,
-    output wire                         dequeue_rw_st0,
-    output wire[WORD_SIZE-1:0]          dequeue_byteen_st0,
-    output wire                         dequeue_is_snp_st0,   
-    output wire                         dequeue_snp_inv_st0,
-    input wire                          dequeue_st3
+    input wire                          dequeue
 );
-    reg [`LINE_ADDR_WIDTH-1:0] addr_table [MSHR_SIZE-1:0];
+    reg [MSHR_SIZE-1:0][`LINE_ADDR_WIDTH-1:0] addr_table;
     
-    reg [MSHR_SIZE-1:0]            valid_table;
-    reg [MSHR_SIZE-1:0]            ready_table;
-    reg [`LOG2UP(MSHR_SIZE)-1:0]   schedule_ptr, restore_ptr;
-    reg [`LOG2UP(MSHR_SIZE)-1:0]   head_ptr;
-    reg [`LOG2UP(MSHR_SIZE)-1:0]   tail_ptr;
-    reg [`LOG2UP(MSHR_SIZE+1)-1:0] size;
+    reg [MSHR_SIZE-1:0]          valid_table;
+    reg [MSHR_SIZE-1:0]          ready_table;
+    reg [`LOG2UP(MSHR_SIZE)-1:0] schedule_ptr, schedule_n_ptr;
+    reg [`LOG2UP(MSHR_SIZE)-1:0] restore_ptr;
+    reg [`LOG2UP(MSHR_SIZE)-1:0] head_ptr, tail_ptr;    
+    reg [`LOG2UP(MSHR_SIZE)-1:0] used_r;
+    reg                          full_r;
 
-    assign enqueue_full = (size == $bits(size)'(MSHR_SIZE));
-
+    reg                        schedule_valid_r, schedule_valid_n_r;
+    reg [`LINE_ADDR_WIDTH-1:0] schedule_addr_r, schedule_addr_n_r;
+    reg [`MSHR_DATA_WIDTH-1:0] dout_r, dout_n_r;
+    
     wire [MSHR_SIZE-1:0] valid_address_match;
     for (genvar i = 0; i < MSHR_SIZE; i++) begin
-        assign valid_address_match[i] = valid_table[i] && (addr_table[i] == addr_st0);
+        assign valid_address_match[i] = valid_table[i] && (addr_table[i] == lookup_addr);
     end
 
-    assign pending_hazard_st0 = (| valid_address_match);
-
-    wire dequeue_ready = ready_table[schedule_ptr];
-
-    assign dequeue_valid_st0 = dequeue_ready;
-    assign dequeue_addr_st0 = addr_table[schedule_ptr];
+    assign lookup_match = (| valid_address_match);
     
-    wire mshr_push = enqueue_st3 && !enqueue_is_mshr_st3;
+    wire push_new = enqueue && !enqueue_is_mshr;
+    wire restore = enqueue && enqueue_is_mshr;
 
     wire [`LOG2UP(MSHR_SIZE)-1:0] head_ptr_n = head_ptr + $bits(head_ptr)'(1);
 
     always @(posedge clk) begin
         if (reset) begin
-            valid_table  <= 0;
-            ready_table  <= 0;
-            schedule_ptr <= 0; 
-            restore_ptr  <= 0;           
-            head_ptr     <= 0;
-            tail_ptr     <= 0;
-            size         <= 0;
-        end else begin
-            if (update_ready_st0) begin                
+            valid_table     <= 0;
+            ready_table     <= 0;
+            schedule_ptr    <= 0; 
+            schedule_n_ptr  <= 1;
+            restore_ptr     <= 0;           
+            head_ptr        <= 0;
+            tail_ptr        <= 0;
+        end else begin            
+            
+            // WARNING: lookup should happen enqueue for ready_table's correct update
+            if (lookup_ready) begin                
+                // unlock pending requests for scheduling                
                 ready_table <= ready_table | valid_address_match;
             end
 
-            if (enqueue_st3) begin
-                assert(!enqueue_full);
-                if (enqueue_is_mshr_st3) begin
-                    // returning missed msrq entry, restore schedule  
+            if (enqueue) begin                
+                if (enqueue_is_mshr) begin
+                    // restore schedule, returning missed msrq entry
                     valid_table[restore_ptr] <= 1;
-                    ready_table[restore_ptr] <= enqueue_ready_st3;                    
-                    restore_ptr  <= restore_ptr + $bits(restore_ptr)'(1);                
-                    schedule_ptr <= head_ptr;
+                    ready_table[restore_ptr] <= enqueue_ready;                    
+                    restore_ptr    <= restore_ptr + $bits(restore_ptr)'(1);                
+                    schedule_ptr   <= head_ptr;
+                    schedule_n_ptr <= head_ptr_n;
                 end else begin
+                    // push new entry
+                    assert(!full_r);
                     valid_table[tail_ptr] <= 1;                    
-                    ready_table[tail_ptr] <= enqueue_ready_st3;
+                    ready_table[tail_ptr] <= enqueue_ready;
                     tail_ptr <= tail_ptr + $bits(tail_ptr)'(1);
-                    size <= size + $bits(size)'(1);
                 end
-            end else if (dequeue_st3) begin                
-                head_ptr <= head_ptr_n;
+            end else if (dequeue) begin                
+                // remove scheduled entry from buffer
+                head_ptr    <= head_ptr_n;
                 restore_ptr <= head_ptr_n;
                 valid_table[head_ptr] <= 0;
-                size <= size - $bits(size)'(1);
             end
             
-            if (schedule_st0) begin
-                assert(dequeue_valid_st0);
+            if (schedule) begin
+                // schedule next entry
+                assert(schedule_valid_r);
                 valid_table[schedule_ptr] <= 0;    
-                ready_table[schedule_ptr] <= 0;
-                schedule_ptr <= schedule_ptr + $bits(schedule_ptr)'(1);                
+                ready_table[schedule_ptr] <= 0;            
+
+                schedule_ptr <= schedule_n_ptr;                           
+                if (MSHR_SIZE > 2) begin        
+                    schedule_n_ptr <= schedule_ptr + $bits(schedule_ptr)'(2);
+                end else begin // (SIZE == 2);
+                    schedule_n_ptr <= ~schedule_n_ptr;                                
+                end
             end
         end
     end
 
     always @(posedge clk) begin
-        if (enqueue_st3 && !enqueue_is_mshr_st3) begin
-            addr_table[tail_ptr] <= enqueue_addr_st3;
+        if (push_new) begin
+            addr_table[tail_ptr] <= enqueue_addr;
         end
     end
+
+    wire [`MSHR_DATA_WIDTH-1:0] dout;
 
     VX_dp_ram #(
         .DATAW(`MSHR_DATA_WIDTH),
         .SIZE(MSHR_SIZE),
-        .BYTEENW(1),
-        .BUFFERED(0),
-        .RWCHECK(1)
-    ) datatable (
+        .RWCHECK(1),
+        .FASTRAM(1)
+    ) entries (
         .clk(clk),
         .waddr(tail_ptr),                                
-        .raddr(schedule_ptr),                
-        .wren(mshr_push),
+        .raddr(schedule_n_ptr),                
+        .wren(push_new),
         .byteen(1'b1),
         .rden(1'b1),
-        .din({enqueue_data_st3,  enqueue_tid_st3, enqueue_tag_st3, enqueue_rw_st3, enqueue_byteen_st3, enqueue_wsel_st3, enqueue_is_snp_st3, enqueue_snp_inv_st3}),
-        .dout({dequeue_data_st0, dequeue_tid_st0, dequeue_tag_st0, dequeue_rw_st0, dequeue_byteen_st0, dequeue_wsel_st0, dequeue_is_snp_st0, dequeue_snp_inv_st0})
+        .din(enqueue_data),
+        .dout(dout)
     );
+
+    always @(*) begin
+        schedule_valid_n_r = schedule_valid_r;
+        if (reset) begin
+            schedule_valid_n_r = 0;
+        end else begin
+            if (lookup_ready) begin
+                schedule_valid_n_r = 1;
+            end else if (schedule) begin
+                schedule_valid_n_r = ready_table[schedule_n_ptr];
+            end
+        end
+    end
+
+    always @(*) begin
+        schedule_addr_n_r = schedule_addr_r;
+        dout_n_r          = dout_r;
+        if ((push_new && (used_r == 0 || (used_r == 1 && schedule))) || restore) begin
+            schedule_addr_n_r = enqueue_addr;
+            dout_n_r          = enqueue_data;
+        end else if (schedule) begin
+            schedule_addr_n_r = addr_table[schedule_n_ptr];
+            dout_n_r          = dout;
+        end
+    end
+
+    always @(posedge clk) begin
+        if (reset) begin
+            used_r <= 0;
+            full_r <= 0;
+        end else begin
+            used_r <= used_r + $bits(used_r)'($signed(2'(enqueue) - 2'(schedule)));
+            full_r <= (used_r == $bits(used_r)'(MSHR_SIZE-1)) && enqueue;
+        end
+        schedule_valid_r <= schedule_valid_n_r;
+        schedule_addr_r  <= schedule_addr_n_r;
+        dout_r           <= dout_n_r;
+    end
+
+    assign schedule_valid = schedule_valid_r;
+    assign schedule_addr  = schedule_addr_r;
+    assign schedule_data  = dout_r;
+
+    assign schedule_valid_next = schedule_valid_n_r;
+    assign schedule_addr_next  = schedule_addr_n_r;
+    assign schedule_data_next  = dout_n_r;
 
 `ifdef DBG_PRINT_CACHE_MSHR        
     always @(posedge clk) begin        
-        if (update_ready_st0 || schedule_st0 || enqueue_st3 || dequeue_st3) begin
-            if (schedule_st0)
-                $display("%t: cache%0d:%0d msrq-schedule: addr%0d=%0h, wid=%0d, PC=%0h", $time, CACHE_ID, BANK_ID, schedule_ptr, `LINE_TO_BYTE_ADDR(dequeue_addr_st0, BANK_ID), debug_wid_st0, debug_pc_st0);      
-            if (enqueue_st3) begin
-                if (enqueue_is_mshr_st3)
-                    $display("%t: cache%0d:%0d msrq-restore: addr%0d=%0h, ready=%b", $time, CACHE_ID, BANK_ID, restore_ptr, `LINE_TO_BYTE_ADDR(enqueue_addr_st3, BANK_ID), enqueue_ready_st3);
+        if (lookup_ready || schedule || enqueue || dequeue) begin
+            if (schedule)
+                $display("%t: cache%0d:%0d msrq-schedule: addr%0d=%0h, wid=%0d, PC=%0h", $time, CACHE_ID, BANK_ID, schedule_ptr, `LINE_TO_BYTE_ADDR(schedule_addr, BANK_ID), deq_debug_wid, deq_debug_pc);      
+            if (enqueue) begin
+                if (enqueue_is_mshr)
+                    $display("%t: cache%0d:%0d msrq-restore: addr%0d=%0h, ready=%b", $time, CACHE_ID, BANK_ID, restore_ptr, `LINE_TO_BYTE_ADDR(enqueue_addr, BANK_ID), enqueue_ready);
                 else
-                    $display("%t: cache%0d:%0d msrq-enq: addr%0d=%0h, ready=%b, wid=%0d, PC=%0h", $time, CACHE_ID, BANK_ID, tail_ptr, `LINE_TO_BYTE_ADDR(enqueue_addr_st3, BANK_ID), enqueue_ready_st3, debug_wid_st3, debug_pc_st3);
+                    $display("%t: cache%0d:%0d msrq-enq: addr%0d=%0h, ready=%b, wid=%0d, PC=%0h", $time, CACHE_ID, BANK_ID, tail_ptr, `LINE_TO_BYTE_ADDR(enqueue_addr, BANK_ID), enqueue_ready, enq_debug_wid, enq_debug_pc);
             end 
-            if (dequeue_st3)
-                $display("%t: cache%0d:%0d msrq-deq addr%0d, wid=%0d, PC=%0h", $time, CACHE_ID, BANK_ID, head_ptr, debug_wid_st3, debug_pc_st3);
+            if (dequeue)
+                $display("%t: cache%0d:%0d msrq-deq addr%0d, wid=%0d, PC=%0h", $time, CACHE_ID, BANK_ID, head_ptr, enq_debug_wid, enq_debug_pc);
             $write("%t: cache%0d:%0d msrq-table", $time, CACHE_ID, BANK_ID);
             for (integer j = 0; j < MSHR_SIZE; j++) begin
                 if (valid_table[j]) begin

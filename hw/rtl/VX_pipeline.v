@@ -11,12 +11,12 @@ module VX_pipeline #(
 
     // Dcache core request
     output wire [`NUM_THREADS-1:0]          dcache_req_valid,
-    output wire                             dcache_req_rw,
+    output wire [`NUM_THREADS-1:0]          dcache_req_rw,
     output wire [`NUM_THREADS-1:0][3:0]     dcache_req_byteen,
     output wire [`NUM_THREADS-1:0][29:0]    dcache_req_addr,
     output wire [`NUM_THREADS-1:0][31:0]    dcache_req_data,
-    output wire [`DCORE_TAG_WIDTH-1:0]      dcache_req_tag,    
-    input wire                              dcache_req_ready,
+    output wire [`NUM_THREADS-1:0][`DCORE_TAG_WIDTH-1:0] dcache_req_tag,    
+    input wire [`NUM_THREADS-1:0]           dcache_req_ready,
 
     // Dcache core reponse    
     input wire [`NUM_THREADS-1:0]           dcache_rsp_valid,
@@ -40,16 +40,16 @@ module VX_pipeline #(
     output wire                             icache_rsp_ready,
     
     // CSR I/O Request
-    input  wire                             csr_io_req_valid,
-    input  wire[11:0]                       csr_io_req_addr,
-    input  wire                             csr_io_req_rw,
-    input  wire[31:0]                       csr_io_req_data,
-    output wire                             csr_io_req_ready,
+    input  wire                             csr_req_valid,
+    input  wire[11:0]                       csr_req_addr,
+    input  wire                             csr_req_rw,
+    input  wire[31:0]                       csr_req_data,
+    output wire                             csr_req_ready,
 
     // CSR I/O Response
-    output wire                             csr_io_rsp_valid,
-    output wire[31:0]                       csr_io_rsp_data,
-    input wire                              csr_io_rsp_ready,      
+    output wire                             csr_rsp_valid,
+    output wire[31:0]                       csr_rsp_data,
+    input wire                              csr_rsp_ready,      
 
 `ifdef PERF_ENABLE
     VX_perf_memsys_if                       perf_memsys_if,
@@ -134,22 +134,20 @@ module VX_pipeline #(
     //
 
     VX_csr_io_req_if csr_io_req_if();
-
-    assign csr_io_req_if.valid = csr_io_req_valid;
-    assign csr_io_req_if.rw    = csr_io_req_rw;
-    assign csr_io_req_if.addr  = csr_io_req_addr;
-    assign csr_io_req_if.data  = csr_io_req_data;
-    assign csr_io_req_ready    = csr_io_req_if.ready;
+    assign csr_io_req_if.valid = csr_req_valid;
+    assign csr_io_req_if.rw    = csr_req_rw;
+    assign csr_io_req_if.addr  = csr_req_addr;
+    assign csr_io_req_if.data  = csr_req_data;
+    assign csr_req_ready = csr_io_req_if.ready;
 
     //
     // CSR IO response
     //
 
     VX_csr_io_rsp_if csr_io_rsp_if();
-
-    assign csr_io_rsp_valid    = csr_io_rsp_if.valid; 
-    assign csr_io_rsp_data     = csr_io_rsp_if.data; 
-    assign csr_io_rsp_if.ready = csr_io_rsp_ready;
+    assign csr_rsp_valid = csr_io_rsp_if.valid; 
+    assign csr_rsp_data  = csr_io_rsp_if.data; 
+    assign csr_io_rsp_if.ready = csr_rsp_ready;
 
     ///////////////////////////////////////////////////////////////////////////
 
@@ -288,79 +286,5 @@ module VX_pipeline #(
         .writeback_if   (writeback_if),
         .cmt_to_csr_if  (cmt_to_csr_if)
     );
-
-`ifdef PERF_ENABLE
-    reg [63:0] perf_icache_stalls;
-    reg [63:0] perf_ibuffer_stalls;
-    reg [63:0] perf_alu_stalls;
-    reg [63:0] perf_lsu_stalls;
-    reg [63:0] perf_csr_stalls;
-    reg [63:0] perf_gpu_stalls;
-`ifdef EXT_M_ENABLE
-    reg [63:0] perf_mul_stalls;
-`endif
-`ifdef EXT_F_ENABLE
-    reg [63:0] perf_fpu_stalls;
-`endif
-
-    always @(posedge clk) begin
-        if (reset) begin
-            perf_icache_stalls  <= 0;
-            perf_ibuffer_stalls <= 0;
-            perf_alu_stalls <= 0;
-            perf_lsu_stalls <= 0;
-            perf_csr_stalls <= 0;
-            perf_gpu_stalls <= 0;
-        `ifdef EXT_M_ENABLE
-            perf_mul_stalls <= 0;
-        `endif
-        `ifdef EXT_F_ENABLE
-            perf_fpu_stalls <= 0;
-        `endif
-        end else begin
-            if (core_icache_req_if.valid & !core_icache_req_if.ready) begin
-                perf_icache_stalls <= perf_icache_stalls + 64'd1;
-            end
-            if (decode_if.valid & !decode_if.ready) begin
-                perf_ibuffer_stalls <= perf_ibuffer_stalls + 64'd1;
-            end
-            if (alu_req_if.valid & !alu_req_if.ready) begin
-                perf_alu_stalls <= perf_alu_stalls + 64'd1;
-            end
-            if (lsu_req_if.valid & !lsu_req_if.ready) begin
-                perf_lsu_stalls <= perf_lsu_stalls + 64'd1;
-            end
-            if (csr_req_if.valid & !csr_req_if.ready) begin
-                perf_csr_stalls <= perf_csr_stalls + 64'd1;
-            end
-            if (gpu_req_if.valid & !gpu_req_if.ready) begin
-                perf_gpu_stalls <= perf_gpu_stalls + 64'd1;
-            end
-        `ifdef EXT_M_ENABLE
-            if (mul_req_if.valid & !mul_req_if.ready) begin
-                perf_mul_stalls <= perf_mul_stalls + 64'd1;
-            end
-        `endif
-        `ifdef EXT_F_ENABLE
-            if (fpu_req_if.valid & !fpu_req_if.ready) begin
-                perf_fpu_stalls <= perf_fpu_stalls + 64'd1;
-            end
-        `endif
-        end
-    end
-
-    assign perf_pipeline_if.icache_stalls = perf_icache_stalls; 
-    assign perf_pipeline_if.ibuffer_stalls = perf_ibuffer_stalls;
-    assign perf_pipeline_if.alu_stalls = perf_alu_stalls;
-    assign perf_pipeline_if.lsu_stalls = perf_lsu_stalls;
-    assign perf_pipeline_if.csr_stalls = perf_csr_stalls;
-    assign perf_pipeline_if.gpu_stalls = perf_gpu_stalls;
-`ifdef EXT_M_ENABLE
-    assign perf_pipeline_if.mul_stalls = perf_mul_stalls;
-`endif
-`ifdef EXT_F_ENABLE
-    assign perf_pipeline_if.fpu_stalls = perf_fpu_stalls;
-`endif
-`endif
     
 endmodule

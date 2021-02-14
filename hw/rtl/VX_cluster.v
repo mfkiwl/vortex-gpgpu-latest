@@ -72,11 +72,11 @@ module VX_cluster #(
         
         wire core_reset;
         VX_reset_relay #(
-            .PASSTHRU (`NUM_CORES == 1)
+            .DEPTH (`NUM_CORES > 1)
         ) reset_relay (
-            .clk       (clk),
-            .reset     (reset),
-            .reset_out (core_reset)
+            .clk     (clk),
+            .reset   (reset),
+            .reset_o (core_reset)
         );
 
         VX_core #(
@@ -172,7 +172,6 @@ module VX_cluster #(
             .DRSQ_SIZE          (`L2DRSQ_SIZE),
             .CRSQ_SIZE          (`L2CRSQ_SIZE),
             .DREQ_SIZE          (`L2DREQ_SIZE),
-            .DRAM_ENABLE        (1),
             .WRITE_ENABLE       (1),          
             .CORE_TAG_WIDTH     (`XDRAM_TAG_WIDTH),
             .CORE_TAG_ID_BITS   (0),
@@ -182,6 +181,8 @@ module VX_cluster #(
               
             .clk                (clk),
             .reset              (reset),
+
+            .flush              (1'b0),
 
         `ifdef PERF_ENABLE
             .perf_cache_if      (perf_l2cache_if),

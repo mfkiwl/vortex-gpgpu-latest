@@ -73,11 +73,11 @@ module Vortex (
 
         wire cluster_reset;
         VX_reset_relay #(
-            .PASSTHRU (`NUM_CLUSTERS == 1)
+            .DEPTH (`NUM_CLUSTERS > 1)
         ) reset_relay (
-            .clk       (clk),
-            .reset     (reset),
-            .reset_out (cluster_reset)
+            .clk     (clk),
+            .reset   (reset),
+            .reset_o (cluster_reset)
         );
 
         VX_cluster #(
@@ -165,7 +165,7 @@ module Vortex (
         VX_cache #(
             .CACHE_ID           (`L3CACHE_ID),
             .CACHE_SIZE         (`L3CACHE_SIZE),
-            .CACHE_LINE_SIZE     (`L3CACHE_LINE_SIZE),
+            .CACHE_LINE_SIZE    (`L3CACHE_LINE_SIZE),
             .NUM_BANKS          (`L3NUM_BANKS),
             .WORD_SIZE          (`L3WORD_SIZE),
             .NUM_REQS           (`NUM_CLUSTERS),
@@ -174,7 +174,6 @@ module Vortex (
             .DRSQ_SIZE          (`L3DRSQ_SIZE),
             .CRSQ_SIZE          (`L3CRSQ_SIZE),
             .DREQ_SIZE          (`L3DREQ_SIZE),
-            .DRAM_ENABLE        (1),
             .WRITE_ENABLE       (1),
             .CORE_TAG_WIDTH     (`L2DRAM_TAG_WIDTH),
             .CORE_TAG_ID_BITS   (0),
@@ -184,6 +183,8 @@ module Vortex (
  
             .clk                (clk),
             .reset              (reset),
+
+            .flush              (1'b0),
 
         `ifdef PERF_ENABLE
             .perf_cache_if      (perf_l3cache_if),

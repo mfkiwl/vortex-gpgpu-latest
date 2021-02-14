@@ -9,7 +9,8 @@ module VX_sp_ram #(
     parameter RWCHECK  = 1,
     parameter ADDRW    = $clog2(SIZE),
     parameter SIZEW    = $clog2(SIZE+1),
-    parameter FASTRAM  = 0
+    parameter FASTRAM  = 0,
+    parameter INITZERO = 0
 ) ( 
     input wire              clk,
     input wire [ADDRW-1:0]  addr,
@@ -22,23 +23,22 @@ module VX_sp_ram #(
 
     `STATIC_ASSERT((1 == BYTEENW) || ((BYTEENW > 1) && 0 == (BYTEENW % 4)), ("invalid parameter"))
 
-    localparam DATA32W   = DATAW / 32;
-    localparam BYTEEN32W = BYTEENW / 4;
-
     if (FASTRAM) begin
         if (BUFFERED) begin        
             reg [DATAW-1:0] dout_r;
 
             if (BYTEENW > 1) begin
-                `USE_FAST_BRAM reg [DATA32W-1:0][3:0][7:0] mem [SIZE-1:0];
+                `USE_FAST_BRAM reg [BYTEENW-1:0][7:0] mem [SIZE-1:0];
+
+                if (INITZERO) begin
+                    initial mem = '{default: 0};
+                end
 
                 always @(posedge clk) begin
                     if (wren) begin
-                        for (integer j = 0; j < BYTEEN32W; j++) begin
-                            for (integer i = 0; i < 4; i++) begin
-                                if (byteen[j * 4 + i])
-                                    mem[addr][j][i] <= din[j * 32 + i * 8 +: 8];
-                            end
+                        for (integer i = 0; i < BYTEENW; i++) begin
+                            if (byteen[i])
+                                mem[addr][i] <= din[i * 8 +: 8];
                         end
                     end
                     if (rden)
@@ -46,6 +46,10 @@ module VX_sp_ram #(
                 end
             end else begin
                 `USE_FAST_BRAM reg [DATAW-1:0] mem [SIZE-1:0];
+
+                if (INITZERO) begin
+                    initial mem = '{default: 0};
+                end
 
                 always @(posedge clk) begin
                     if (wren && byteen)
@@ -58,21 +62,27 @@ module VX_sp_ram #(
         end else begin
             `UNUSED_VAR (rden)
             if (BYTEENW > 1) begin
-                `USE_FAST_BRAM reg [DATA32W-1:0][3:0][7:0] mem [SIZE-1:0];
+                `USE_FAST_BRAM reg [BYTEENW-1:0][7:0] mem [SIZE-1:0];
+
+                if (INITZERO) begin
+                    initial mem = '{default: 0};
+                end
 
                 always @(posedge clk) begin
                     if (wren) begin
-                        for (integer j = 0; j < BYTEEN32W; j++) begin
-                            for (integer i = 0; i < 4; i++) begin
-                                if (byteen[j * 4 + i])
-                                    mem[addr][j][i] <= din[j * 32 + i * 8 +: 8];
-                            end
+                        for (integer i = 0; i < BYTEENW; i++) begin
+                            if (byteen[i])
+                                mem[addr][i] <= din[i * 8 +: 8];
                         end
                     end
                 end
                 assign dout = mem[addr];
             end else begin
                 `USE_FAST_BRAM reg [DATAW-1:0] mem [SIZE-1:0];
+
+                if (INITZERO) begin
+                    initial mem = '{default: 0};
+                end
 
                 always @(posedge clk) begin
                     if (wren && byteen)
@@ -86,15 +96,17 @@ module VX_sp_ram #(
             reg [DATAW-1:0] dout_r;
 
             if (BYTEENW > 1) begin
-                reg [DATA32W-1:0][3:0][7:0] mem [SIZE-1:0];
+                reg [BYTEENW-1:0][7:0] mem [SIZE-1:0];
+
+                if (INITZERO) begin
+                    initial mem = '{default: 0};
+                end
 
                 always @(posedge clk) begin
                     if (wren) begin
-                        for (integer j = 0; j < BYTEEN32W; j++) begin
-                            for (integer i = 0; i < 4; i++) begin
-                                if (byteen[j * 4 + i])
-                                    mem[addr][j][i] <= din[j * 32 + i * 8 +: 8];
-                            end
+                        for (integer i = 0; i < BYTEENW; i++) begin
+                            if (byteen[i])
+                                mem[addr][i] <= din[i * 8 +: 8];
                         end
                     end
                     if (rden)
@@ -102,6 +114,10 @@ module VX_sp_ram #(
                 end
             end else begin
                 reg [DATAW-1:0] mem [SIZE-1:0];
+
+                if (INITZERO) begin
+                    initial mem = '{default: 0};
+                end
 
                 always @(posedge clk) begin
                     if (wren && byteen)
@@ -115,21 +131,27 @@ module VX_sp_ram #(
             `UNUSED_VAR (rden)
             if (RWCHECK) begin
                 if (BYTEENW > 1) begin
-                    reg [DATA32W-1:0][3:0][7:0] mem [SIZE-1:0];
+                    reg [BYTEENW-1:0][7:0] mem [SIZE-1:0];
+
+                    if (INITZERO) begin
+                        initial mem = '{default: 0};
+                    end
 
                     always @(posedge clk) begin
                         if (wren) begin
-                            for (integer j = 0; j < BYTEEN32W; j++) begin
-                                for (integer i = 0; i < 4; i++) begin
-                                    if (byteen[j * 4 + i])
-                                        mem[addr][j][i] <= din[j * 32 + i * 8 +: 8];
-                                end
+                            for (integer i = 0; i < BYTEENW; i++) begin
+                                if (byteen[i])
+                                    mem[addr][i] <= din[i * 8 +: 8];
                             end
                         end
                     end
                     assign dout = mem[addr];
                 end else begin
                     reg [DATAW-1:0] mem [SIZE-1:0];
+
+                    if (INITZERO) begin
+                        initial mem = '{default: 0};
+                    end
 
                     always @(posedge clk) begin
                         if (wren && byteen)
@@ -139,21 +161,27 @@ module VX_sp_ram #(
                 end
             end else begin
                 if (BYTEENW > 1) begin
-                    `NO_RW_RAM_CHECK reg [DATA32W-1:0][3:0][7:0] mem [SIZE-1:0];
+                    `NO_RW_RAM_CHECK reg [BYTEENW-1:0][7:0] mem [SIZE-1:0];
+
+                    if (INITZERO) begin
+                        initial mem = '{default: 0};
+                    end
 
                     always @(posedge clk) begin
                         if (wren) begin
-                            for (integer j = 0; j < BYTEEN32W; j++) begin
-                                for (integer i = 0; i < 4; i++) begin
-                                    if (byteen[j * 4 + i])
-                                        mem[addr][j][i] <= din[j * 32 + i * 8 +: 8];
-                                end
+                            for (integer i = 0; i < BYTEENW; i++) begin
+                                if (byteen[i])
+                                    mem[addr][i] <= din[i * 8 +: 8];
                             end
                         end
                     end
                     assign dout = mem[addr];
                 end else begin
-                    `NO_RW_RAM_CHECK reg [DATAW-1:0] mem [SIZE-1:0];  
+                    `NO_RW_RAM_CHECK reg [DATAW-1:0] mem [SIZE-1:0];
+
+                    if (INITZERO) begin
+                        initial mem = '{default: 0};
+                    end  
 
                     always @(posedge clk) begin
                         if (wren && byteen)

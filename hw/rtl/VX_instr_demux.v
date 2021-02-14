@@ -17,11 +17,13 @@ module VX_instr_demux (
     VX_gpu_req_if   gpu_req_if    
 );
     wire [`NT_BITS-1:0] tid;
+
     VX_priority_encoder #(
-        .DATAW (`NUM_THREADS)
+        .N (`NUM_THREADS)
     ) tid_select (
-        .data_in  (execute_if.tmask),
-        .data_out (tid),
+        .data_in    (execute_if.tmask),
+        .index      (tid),
+        `UNUSED_PIN (onehot),
         `UNUSED_PIN (valid_out)
     );
 
@@ -36,7 +38,8 @@ module VX_instr_demux (
 
     VX_skid_buffer #(
         .DATAW (`NW_BITS + `NUM_THREADS + 32 + 32 + `ALU_BR_BITS + 1 + 32 + 1 + 1 + `NR_BITS + 1 + `NT_BITS + (2 * `NUM_THREADS * 32)),
-        .NOBACKPRESSURE (1) // ALU has no back pressure
+        .NOBACKPRESSURE (1), // ALU has no back pressure,
+        .BUFFERED (0)
     ) alu_buffer (
         .clk       (clk),
         .reset     (reset),
@@ -54,14 +57,15 @@ module VX_instr_demux (
     wire lsu_req_ready;
 
     VX_skid_buffer #(
-        .DATAW (`NW_BITS + `NUM_THREADS + 32 + 1 + `BYTEEN_BITS + 32 + `NR_BITS + 1 + (2 * `NUM_THREADS * 32))
+        .DATAW (`NW_BITS + `NUM_THREADS + 32 + `LSU_BITS + 32 + `NR_BITS + 1 + (2 * `NUM_THREADS * 32)),
+        .BUFFERED (0)
     ) lsu_buffer (
         .clk       (clk),
         .reset     (reset),
         .valid_in  (lsu_req_valid),
         .ready_in  (lsu_req_ready),
-        .data_in   ({execute_if.wid, execute_if.tmask, execute_if.PC, `LSU_RW(execute_if.op_type), `LSU_BE(execute_if.op_type), execute_if.imm,    execute_if.rd, execute_if.wb, gpr_rsp_if.rs1_data,  gpr_rsp_if.rs2_data}),
-        .data_out  ({lsu_req_if.wid, lsu_req_if.tmask, lsu_req_if.PC, lsu_req_if.rw,               lsu_req_if.byteen,           lsu_req_if.offset, lsu_req_if.rd, lsu_req_if.wb, lsu_req_if.base_addr, lsu_req_if.store_data}),
+        .data_in   ({execute_if.wid, execute_if.tmask, execute_if.PC, `LSU_OP(execute_if.op_type), execute_if.imm,    execute_if.rd, execute_if.wb, gpr_rsp_if.rs1_data,  gpr_rsp_if.rs2_data}),
+        .data_out  ({lsu_req_if.wid, lsu_req_if.tmask, lsu_req_if.PC, lsu_req_if.op_type,          lsu_req_if.offset, lsu_req_if.rd, lsu_req_if.wb, lsu_req_if.base_addr, lsu_req_if.store_data}),
         .valid_out (lsu_req_if.valid),
         .ready_out (lsu_req_if.ready)
     );
@@ -72,7 +76,8 @@ module VX_instr_demux (
     wire csr_req_ready;
 
     VX_skid_buffer #(
-        .DATAW (`NW_BITS + `NUM_THREADS + 32 + `CSR_BITS + `CSR_ADDR_BITS + `NR_BITS + 1 + 1 + `NR_BITS + 32)
+        .DATAW (`NW_BITS + `NUM_THREADS + 32 + `CSR_BITS + `CSR_ADDR_BITS + `NR_BITS + 1 + 1 + `NR_BITS + 32),
+        .BUFFERED (0)
     ) csr_buffer (
         .clk       (clk),
         .reset     (reset),
@@ -91,7 +96,8 @@ module VX_instr_demux (
     wire mul_req_ready;
 
     VX_skid_buffer #(
-        .DATAW (`NW_BITS + `NUM_THREADS + 32 + `MUL_BITS + `NR_BITS + 1 + (2 * `NUM_THREADS * 32))
+        .DATAW (`NW_BITS + `NUM_THREADS + 32 + `MUL_BITS + `NR_BITS + 1 + (2 * `NUM_THREADS * 32)),
+        .BUFFERED (0)
     ) mul_buffer (
         .clk       (clk),
         .reset     (reset),
@@ -111,7 +117,8 @@ module VX_instr_demux (
     wire fpu_req_ready;
 
     VX_skid_buffer #(
-        .DATAW (`NW_BITS + `NUM_THREADS + 32 + `FPU_BITS + `MOD_BITS + `NR_BITS + 1 + (3 * `NUM_THREADS * 32))
+        .DATAW (`NW_BITS + `NUM_THREADS + 32 + `FPU_BITS + `MOD_BITS + `NR_BITS + 1 + (3 * `NUM_THREADS * 32)),
+        .BUFFERED (0)
     ) fpu_buffer (
         .clk       (clk),
         .reset     (reset),
@@ -132,7 +139,8 @@ module VX_instr_demux (
     wire gpu_req_ready;
 
     VX_skid_buffer #(
-        .DATAW (`NW_BITS + `NUM_THREADS + 32 + 32 + `GPU_BITS + `NR_BITS + 1 + (`NUM_THREADS * 32 + 32))
+        .DATAW (`NW_BITS + `NUM_THREADS + 32 + 32 + `GPU_BITS + `NR_BITS + 1 + (`NUM_THREADS * 32 + 32)),
+        .BUFFERED (0)
     ) gpu_buffer (
         .clk       (clk),
         .reset     (reset),
@@ -145,15 +153,18 @@ module VX_instr_demux (
     ); 
 
     // can take next request?
-    assign execute_if.ready = (alu_req_ready && (execute_if.ex_type == `EX_ALU))
-                           || (lsu_req_ready && (execute_if.ex_type == `EX_LSU))
-                           || (csr_req_ready && (execute_if.ex_type == `EX_CSR))
-                       `ifdef EXT_M_ENABLE
-                           || (mul_req_ready && (execute_if.ex_type == `EX_MUL))
-                       `endif
-                       `ifdef EXT_F_ENABLE
-                           || (fpu_req_ready && (execute_if.ex_type == `EX_FPU))
-                       `endif
-                           || (gpu_req_ready && (execute_if.ex_type == `EX_GPU));
+    reg ready_r;
+    always @(*) begin
+        case (execute_if.ex_type) 
+        `EX_ALU: ready_r = alu_req_ready;
+        `EX_LSU: ready_r = lsu_req_ready;
+        `EX_CSR: ready_r = csr_req_ready;
+        `EX_MUL: ready_r = mul_req_ready;
+        `EX_FPU: ready_r = fpu_req_ready;
+        `EX_GPU: ready_r = gpu_req_ready;
+        default: ready_r = 1'b1; // ignore NOPs
+        endcase
+    end
+    assign execute_if.ready = ready_r;
     
 endmodule

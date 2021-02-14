@@ -25,28 +25,6 @@ extern int vx_upload_kernel_bytes(vx_device_h device, const void* content, size_
   // get buffer address
   auto buf_ptr = (uint8_t*)vx_host_ptr(buffer);
 
-#if defined(USE_SIMX)
-  // default startup routine
-  ((uint32_t*)buf_ptr)[0] = 0xf1401073;
-  ((uint32_t*)buf_ptr)[1] = 0xf1401073;      
-  ((uint32_t*)buf_ptr)[2] = 0x30101073;
-  ((uint32_t*)buf_ptr)[3] = 0x800000b7;
-  ((uint32_t*)buf_ptr)[4] = 0x000080e7;
-  err = vx_copy_to_dev(buffer, 0, 5 * 4, 0);
-  if (err != 0) {
-    vx_buf_release(buffer);
-    return err;
-  }
-
-  // newlib io simulator trap
-  ((uint32_t*)buf_ptr)[0] = 0x00008067;
-  err = vx_copy_to_dev(buffer, 0x70000000, 4, 0);
-  if (err != 0) {
-    vx_buf_release(buffer);
-    return err;
-  }
-#endif
-
   //
   // upload content
   //
@@ -147,8 +125,8 @@ extern int vx_dump_perf(vx_device_h device, FILE* stream) {
   for (unsigned core_id = 0; core_id < num_cores; ++core_id) {     
 
     uint64_t instrs_per_core, cycles_per_core;
-    ret |= vx_csr_get_l(device, core_id, CSR_MINSTRET, CSR_MINSTRET_H, &instrs_per_core);
-    ret |= vx_csr_get_l(device, core_id, CSR_MCYCLE, CSR_MCYCLE_H, &cycles_per_core);
+    ret |= vx_csr_get_l(device, core_id, CSR_INSTRET, CSR_INSTRET_H, &instrs_per_core);
+    ret |= vx_csr_get_l(device, core_id, CSR_CYCLE, CSR_CYCLE_H, &cycles_per_core);
     float IPC = (float)(double(instrs_per_core) / double(cycles_per_core));
     if (num_cores > 1) fprintf(stream, "PERF: core%d: instrs=%ld, cycles=%ld, IPC=%f\n", core_id, instrs_per_core, cycles_per_core, IPC);            
     instrs += instrs_per_core;
@@ -246,7 +224,7 @@ extern int vx_dump_perf(vx_device_h device, FILE* stream) {
     // bank_stalls
     uint64_t dcache_bank_st_per_core;
     ret |= vx_csr_get_l(device, core_id, CSR_MPM_DCACHE_BANK_ST, CSR_MPM_DCACHE_BANK_ST_H, &dcache_bank_st_per_core);
-    int dcache_bank_utilization = (int)((1.0 - (double(dcache_reads_per_core + dcache_writes_per_core) / double(dcache_reads_per_core + dcache_writes_per_core + dcache_bank_st_per_core))) * 100);
+    int dcache_bank_utilization = (int)((double(dcache_reads_per_core + dcache_writes_per_core) / double(dcache_reads_per_core + dcache_writes_per_core + dcache_bank_st_per_core)) * 100);
     if (num_cores > 1) fprintf(stream, "PERF: core%d: dcache bank stalls=%ld (utilization=%d%%)\n", core_id, dcache_bank_st_per_core, dcache_bank_utilization);
     dcache_bank_stalls += dcache_bank_st_per_core;
     // mshr_stalls
@@ -279,7 +257,7 @@ extern int vx_dump_perf(vx_device_h device, FILE* stream) {
     // bank_stalls
     uint64_t smem_bank_st_per_core;
     ret |= vx_csr_get_l(device, core_id, CSR_MPM_SMEM_BANK_ST, CSR_MPM_SMEM_BANK_ST_H, &smem_bank_st_per_core);
-    int smem_bank_utilization = (int)((1.0 - (double(smem_reads_per_core + smem_writes_per_core) / double(smem_reads_per_core + smem_writes_per_core + smem_bank_st_per_core))) * 100);
+    int smem_bank_utilization = (int)((double(smem_reads_per_core + smem_writes_per_core) / double(smem_reads_per_core + smem_writes_per_core + smem_bank_st_per_core)) * 100);
     if (num_cores > 1) fprintf(stream, "PERF: core%d: smem bank stalls=%ld (utilization=%d%%)\n", core_id, smem_bank_st_per_core, smem_bank_utilization);
     smem_bank_stalls += smem_bank_st_per_core;
 
@@ -288,12 +266,12 @@ extern int vx_dump_perf(vx_device_h device, FILE* stream) {
     ret |= vx_csr_get_l(device, core_id, CSR_MPM_DRAM_READS, CSR_MPM_DRAM_READS_H, &dram_reads_per_core);                
     ret |= vx_csr_get_l(device, core_id, CSR_MPM_DRAM_WRITES, CSR_MPM_DRAM_WRITES_H, &dram_writes_per_core);                
     ret |= vx_csr_get_l(device, core_id, CSR_MPM_DRAM_ST, CSR_MPM_DRAM_ST_H, &dram_stalls_per_core);    
-    ret |= vx_csr_get_l(device, core_id, CSR_MPM_DRAM_LAT, CSR_MPM_DRAM_LAT_H, &dram_lat_per_core);    
-    int avg_dram_lat = (int)(double(dram_lat_per_core) / double(dram_reads_per_core));    
-    int dram_utilization = (int)((1.0 - (double(dram_reads_per_core + dram_writes_per_core) / double(dram_reads_per_core + dram_writes_per_core + dram_stalls_per_core))) * 100);
+    ret |= vx_csr_get_l(device, core_id, CSR_MPM_DRAM_LAT, CSR_MPM_DRAM_LAT_H, &dram_lat_per_core);        
+    int dram_utilization = (int)((double(dram_reads_per_core + dram_writes_per_core) / double(dram_reads_per_core + dram_writes_per_core + dram_stalls_per_core)) * 100);
+    int dram_avg_lat = (int)(double(dram_lat_per_core) / double(dram_reads_per_core));       
     if (num_cores > 1) fprintf(stream, "PERF: core%d: dram requests=%ld (reads=%ld, writes=%ld)\n", core_id, (dram_reads_per_core + dram_writes_per_core), dram_reads_per_core, dram_writes_per_core);
     if (num_cores > 1) fprintf(stream, "PERF: core%d: dram stalls=%ld (utilization=%d%%)\n", core_id, dram_stalls_per_core, dram_utilization);
-    if (num_cores > 1) fprintf(stream, "PERF: core%d: average dram latency=%d cycles\n", core_id, avg_dram_lat);
+    if (num_cores > 1) fprintf(stream, "PERF: core%d: dram average latency=%d cycles\n", core_id, dram_avg_lat);
     dram_reads  += dram_reads_per_core;
     dram_writes += dram_writes_per_core;
     dram_stalls += dram_stalls_per_core;
@@ -308,10 +286,10 @@ extern int vx_dump_perf(vx_device_h device, FILE* stream) {
   int icache_read_hit_ratio = (int)((1.0 - (double(icache_read_misses) / double(icache_reads))) * 100);
   int dcache_read_hit_ratio = (int)((1.0 - (double(dcache_read_misses) / double(dcache_reads))) * 100);
   int dcache_write_hit_ratio = (int)((1.0 - (double(dcache_write_misses) / double(dcache_writes))) * 100);
-  int dcache_bank_utilization = (int)((1.0 - (double(dcache_reads + dcache_writes) / double(dcache_reads + dcache_writes + dcache_bank_stalls))) * 100);
-  int smem_bank_utilization = (int)((1.0 - (double(smem_reads + smem_writes) / double(smem_reads + smem_writes + smem_bank_stalls))) * 100);
-  int dram_utilization = (int)((1.0 - (double(dram_reads + dram_writes) / double(dram_reads + dram_writes + dram_stalls))) * 100);
-  int avg_dram_lat = (int)(double(dram_lat) / double(dram_reads));
+  int dcache_bank_utilization = (int)((double(dcache_reads + dcache_writes) / double(dcache_reads + dcache_writes + dcache_bank_stalls)) * 100);
+  int smem_bank_utilization = (int)((double(smem_reads + smem_writes) / double(smem_reads + smem_writes + smem_bank_stalls)) * 100);
+  int dram_utilization = (int)((double(dram_reads + dram_writes) / double(dram_reads + dram_writes + dram_stalls)) * 100);
+  int dram_avg_lat = (int)(double(dram_lat) / double(dram_reads));
   fprintf(stream, "PERF: ibuffer stalls=%ld\n", ibuffer_stalls);
   fprintf(stream, "PERF: scoreboard stalls=%ld\n", scoreboard_stalls);
   fprintf(stream, "PERF: alu unit stalls=%ld\n", alu_stalls);
@@ -337,7 +315,7 @@ extern int vx_dump_perf(vx_device_h device, FILE* stream) {
   fprintf(stream, "PERF: smem bank stalls=%ld (utilization=%d%%)\n", smem_bank_stalls, smem_bank_utilization);
   fprintf(stream, "PERF: dram requests=%ld (reads=%ld, writes=%ld)\n", (dram_reads + dram_writes), dram_reads, dram_writes);
   fprintf(stream, "PERF: dram stalls=%ld (utilization=%d%%)\n", dram_stalls, dram_utilization);
-  fprintf(stream, "PERF: average dram latency=%d cycles\n", avg_dram_lat);
+  fprintf(stream, "PERF: dram average latency=%d cycles\n", dram_avg_lat);
 #endif
 
   return ret;

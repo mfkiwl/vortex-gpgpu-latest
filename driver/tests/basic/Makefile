@@ -8,10 +8,10 @@ VX_CXX = $(RISCV_TOOLCHAIN_PATH)/bin/riscv32-unknown-elf-g++
 VX_DP  = $(RISCV_TOOLCHAIN_PATH)/bin/riscv32-unknown-elf-objdump
 VX_CP  = $(RISCV_TOOLCHAIN_PATH)/bin/riscv32-unknown-elf-objcopy
 
-VX_CFLAGS += -march=rv32imf -mabi=ilp32f -O3 -Wl,-Bstatic,-T,$(VORTEX_RT_PATH)/linker/vx_link.ld -ffreestanding -nostartfiles -Wl,--gc-sections
-VX_CFLAGS += -I$(VORTEX_RT_PATH)/include
+VX_CFLAGS += -march=rv32imf -mabi=ilp32f -O3 -Wstack-usage=1024 -ffreestanding -nostartfiles -fdata-sections -ffunction-sections
+VX_CFLAGS += -I$(VORTEX_RT_PATH)/include -I$(VORTEX_RT_PATH)/../hw
 
-VX_LDFLAGS += $(VORTEX_RT_PATH)/libvortexrt.a
+VX_LDFLAGS += -Wl,-Bstatic,-T,$(VORTEX_RT_PATH)/linker/vx_link.ld -Wl,--gc-sections $(VORTEX_RT_PATH)/libvortexrt.a
 
 VX_SRCS = kernel.c
 
@@ -43,7 +43,7 @@ $(PROJECT): $(SRCS)
 run-fpga: $(PROJECT)
 	LD_LIBRARY_PATH=../../opae:$(LD_LIBRARY_PATH) ./$(PROJECT) $(OPTS)
 
-run-ase: $(PROJECT)
+run-asesim: $(PROJECT)
 	ASE_LOG=0 LD_LIBRARY_PATH=../../opae/ase:$(LD_LIBRARY_PATH) ./$(PROJECT) $(OPTS)
 
 run-vlsim: $(PROJECT)

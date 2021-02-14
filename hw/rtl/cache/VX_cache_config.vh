@@ -7,15 +7,10 @@
 `include "VX_define.vh"
 `endif
 
-`define REQ_TAG_WIDTH           CORE_TAG_WIDTH
-
 `define REQS_BITS               `LOG2UP(NUM_REQS)
 
-//                               tag              rw   byteen      tid
-`define REQ_INST_META_WIDTH     (`REQ_TAG_WIDTH + 1  + WORD_SIZE + `REQS_BITS)
-
-//                                data         metadata               word_sel              
-`define MSHR_DATA_WIDTH         (`WORD_WIDTH + `REQ_INST_META_WIDTH + `UP(`WORD_SELECT_BITS))
+//                               tag               valid  byteen      tid          word_sel              
+`define MSHR_DATA_WIDTH         (CORE_TAG_WIDTH + (1 +    WORD_SIZE + `REQS_BITS + `UP(`WORD_SELECT_BITS)) * NUM_PORTS)
 
 `define WORD_WIDTH              (8 * WORD_SIZE)
 
@@ -25,7 +20,6 @@
 `define LINES_PER_BANK          (`BANK_SIZE / CACHE_LINE_SIZE)
 `define WORDS_PER_LINE          (CACHE_LINE_SIZE / WORD_SIZE)
 
-`define WORD_SELECT_BITS       `CLOG2(`WORDS_PER_LINE)
 `define WORD_ADDR_WIDTH         (32-`CLOG2(WORD_SIZE))
 `define DRAM_ADDR_WIDTH         (32-`CLOG2(CACHE_LINE_SIZE))
 `define LINE_ADDR_WIDTH         (`DRAM_ADDR_WIDTH-`BANK_SELECT_BITS)
@@ -60,6 +54,8 @@
 ///////////////////////////////////////////////////////////////////////////////
 
 `define CORE_REQ_TAG_COUNT      ((CORE_TAG_ID_BITS != 0) ? 1 : NUM_REQS)
+
+`define BANK_READY_COUNT        ((SHARED_BANK_READY != 0) ? 1 : NUM_BANKS)
 
 `define DRAM_ADDR_BANK(x)       x[`BANK_SELECT_BITS+BANK_ADDR_OFFSET-1 : BANK_ADDR_OFFSET]
 

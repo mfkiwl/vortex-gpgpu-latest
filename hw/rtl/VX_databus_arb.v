@@ -5,18 +5,18 @@ module VX_databus_arb (
     input wire              reset,
 
     // input request
-    VX_cache_core_req_if    core_req_if,
+    VX_dcache_core_req_if   core_req_if,
 
     // output requests
-    VX_cache_core_req_if    cache_req_if,
-    VX_cache_core_req_if    smem_req_if,
+    VX_dcache_core_req_if   cache_req_if,
+    VX_dcache_core_req_if   smem_req_if,
 
     // input responses
-    VX_cache_core_rsp_if    cache_rsp_if,
-    VX_cache_core_rsp_if    smem_rsp_if,
+    VX_dcache_core_rsp_if   cache_rsp_if,
+    VX_dcache_core_rsp_if   smem_rsp_if,
 
     // output response
-    VX_cache_core_rsp_if    core_rsp_if
+    VX_dcache_core_rsp_if   core_rsp_if
 );
     localparam SMEM_ASHIFT = `CLOG2(`SHARED_MEM_BASE_ADDR_ALIGN);    
     localparam REQ_ASHIFT  = `CLOG2(`DWORD_SIZE);
@@ -39,7 +39,8 @@ module VX_databus_arb (
                          && (core_req_if.addr[i][REQ_ADDRW-1:SMEM_ASHIFT-REQ_ASHIFT] < (32-SMEM_ASHIFT)'(`SHARED_MEM_BASE_ADDR >> SMEM_ASHIFT));
 
         VX_skid_buffer #(
-            .DATAW (REQ_DATAW)
+            .DATAW    (REQ_DATAW),
+            .BUFFERED (1)
         ) cache_out_buffer (
             .clk       (clk),
             .reset     (reset),
@@ -52,7 +53,8 @@ module VX_databus_arb (
         );
 
         VX_skid_buffer #(
-            .DATAW (REQ_DATAW)
+            .DATAW    (REQ_DATAW),
+            .BUFFERED (1)
         ) smem_out_buffer (
             .clk       (clk),
             .reset     (reset),

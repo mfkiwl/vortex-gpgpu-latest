@@ -54,14 +54,6 @@
 
 ///////////////////////////////////////////////////////////////////////////////
 
-`define BYTEEN_SB       3'h0 
-`define BYTEEN_SH       3'h1
-`define BYTEEN_SW       3'h2
-`define BYTEEN_UB       3'h4
-`define BYTEEN_UH       3'h5
-`define BYTEEN_BITS     3
-`define BYTEEN_TYPE(x)  x[1:0]
-
 `define FRM_RNE         3'b000  // round to nearest even
 `define FRM_RTZ         3'b001  // round to zero
 `define FRM_RDN         3'b010  // round to -inf
@@ -130,19 +122,14 @@
 `define ALU_BR_OP(x)    x[`ALU_BR_BITS-1:0]
 `define IS_BR_MOD(x)    x[0]
 
-`define LSU_LB          {1'b0, `BYTEEN_SB}
-`define LSU_LH          {1'b0, `BYTEEN_SH}
-`define LSU_LW          {1'b0, `BYTEEN_SW}
-`define LSU_LBU         {1'b0, `BYTEEN_UB}
-`define LSU_LHU         {1'b0, `BYTEEN_UH}
-`define LSU_SB          {1'b1, `BYTEEN_SB}
-`define LSU_SH          {1'b1, `BYTEEN_SH}
-`define LSU_SW          {1'b1, `BYTEEN_SW}
-`define LSU_SBU         {1'b1, `BYTEEN_UB}
-`define LSU_SHU         {1'b1, `BYTEEN_UH}
-`define LSU_BITS        4
-`define LSU_RW(x)       x[3]
-`define LSU_BE(x)       x[2:0]
+`define LSU_SB          3'h0 
+`define LSU_SH          3'h1
+`define LSU_SW          3'h2
+`define LSU_UB          3'h4
+`define LSU_UH          3'h5
+`define LSU_BITS        3
+`define LSU_WSIZE(x)    x[1:0]
+`define LSU_OP(x)       x[`LSU_BITS-1:0]
 
 `define CSR_RW          2'h0
 `define CSR_RS          2'h1
@@ -272,9 +259,6 @@
 // DRAM byte enable bits
 `define IDRAM_BYTEEN_WIDTH      `ICACHE_LINE_SIZE
 
-// Core request size
-`define INUM_REQUESTS           1
-
 ////////////////////////// Dcache Configurable Knobs //////////////////////////
 
 // Cache ID
@@ -302,7 +286,7 @@
 `define DDRAM_BYTEEN_WIDTH      `DCACHE_LINE_SIZE
 
 // DRAM request tag bits
-`define DDRAM_TAG_WIDTH         `LOG2UP(`DNUM_BANKS)
+`define DDRAM_TAG_WIDTH         `DDRAM_ADDR_WIDTH
 
 // Core request size
 `define DNUM_REQUESTS           `NUM_THREADS
@@ -312,14 +296,11 @@
 // Cache ID
 `define SCACHE_ID               (32'(`L3_ENABLE) + 32'(`L2_ENABLE) * `NUM_CLUSTERS + CORE_ID * 3 + 2)
 
-// Block size in bytes
-`define SCACHE_LINE_SIZE        4 
-
 // Word size in bytes
 `define SWORD_SIZE              4
 
 // bank address offset
-`define SBANK_ADDR_OFFSET       `CLOG2(`STACK_SIZE / `SCACHE_LINE_SIZE)
+`define SBANK_ADDR_OFFSET       `CLOG2(`STACK_SIZE / `SWORD_SIZE)
 
 // Core request size
 `define SNUM_REQUESTS           `NUM_THREADS
@@ -351,7 +332,7 @@
 `define L2DRAM_BYTEEN_WIDTH     `L2CACHE_LINE_SIZE
 
 // DRAM request tag bits
-`define L2DRAM_TAG_WIDTH        (`L2_ENABLE ? `LOG2UP(`L2NUM_BANKS) : (`XDRAM_TAG_WIDTH+`CLOG2(`NUM_CORES)))
+`define L2DRAM_TAG_WIDTH        (`L2_ENABLE ? `L2DRAM_ADDR_WIDTH : (`XDRAM_TAG_WIDTH+`CLOG2(`NUM_CORES)))
 
 ////////////////////////// L3cache Configurable Knobs /////////////////////////
 
@@ -377,7 +358,7 @@
 `define L3DRAM_BYTEEN_WIDTH     `L3CACHE_LINE_SIZE
 
 // DRAM request tag bits
-`define L3DRAM_TAG_WIDTH        (`L3_ENABLE ? `LOG2UP(`L3NUM_BANKS) : (`L2DRAM_TAG_WIDTH+`CLOG2(`NUM_CLUSTERS)))
+`define L3DRAM_TAG_WIDTH        (`L3_ENABLE ? `L3DRAM_ADDR_WIDTH : (`L2DRAM_TAG_WIDTH+`CLOG2(`NUM_CLUSTERS)))
 
 ///////////////////////////////////////////////////////////////////////////////
 

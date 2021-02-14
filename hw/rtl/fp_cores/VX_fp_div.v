@@ -29,23 +29,47 @@ module VX_fp_div #(
     wire stall = ~ready_out && valid_out;
     wire enable = ~stall;
 
-    wire _reset;   
+    for (genvar i = 0; i < LANES; i++) begin        
 
-    VX_reset_relay reset_relay (
-        .clk       (clk),
-        .reset     (reset),
-        .reset_out (_reset)
-    );
-    
-    for (genvar i = 0; i < LANES; i++) begin
+        wire fdiv_reset;
+        VX_reset_relay #(
+            .NUM_NODES(1)
+        ) reset_relay (
+            .clk     (clk),
+            .reset   (reset),
+            .reset_o (fdiv_reset)
+        );
+        
+    `ifdef VERILATOR
+        reg [31:0] r;
+        fflags_t f;
+
+        always @(*) begin        
+            dpi_fdiv (dataa[i], datab[i], frm, r, f);
+        end
+        `UNUSED_VAR (f)
+
+        VX_shift_register #(
+            .DATAW  (32),
+            .DEPTH  (`LATENCY_FDIV),
+            .RESETW (1)
+        ) shift_req_dpi (
+            .clk      (clk),
+            .reset    (fdiv_reset),
+            .enable   (enable),
+            .data_in  (r),
+            .data_out (result[i])
+        );
+    `else
         acl_fdiv fdiv (
             .clk    (clk),
-            .areset (_reset),
+            .areset (fdiv_reset),
             .en     (enable),
             .a      (dataa[i]),
             .b      (datab[i]),
             .q      (result[i])
         );
+    `endif
     end
 
     VX_shift_register #(

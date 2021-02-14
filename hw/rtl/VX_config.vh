@@ -108,7 +108,7 @@
 `ifdef ALTERA_S10
 `define LATENCY_FDIV 34
 `else
-`define LATENCY_FDIV 20
+`define LATENCY_FDIV 15
 `endif
 `endif
 
@@ -116,16 +116,8 @@
 `ifdef ALTERA_S10
 `define LATENCY_FSQRT 25
 `else
-`define LATENCY_FSQRT 15
+`define LATENCY_FSQRT 10
 `endif
-`endif
-
-`ifndef LATENCY_ITOF
-`define LATENCY_ITOF 7
-`endif
-
-`ifndef LATENCY_FTOI
-`define LATENCY_FTOI 3
 `endif
 
 `ifndef LATENCY_FDIVSQRT
@@ -158,10 +150,10 @@
 `define CSR_MEPC        12'h341
 
 // Machine Counter/Timers
-`define CSR_MCYCLE      12'hB00
-`define CSR_MCYCLE_H    12'hB80
-`define CSR_MINSTRET    12'hB02
-`define CSR_MINSTRET_H  12'hB82
+`define CSR_CYCLE       12'hC00
+`define CSR_CYCLE_H     12'hC80
+`define CSR_INSTRET     12'hC02
+`define CSR_INSTRET_H   12'hC82
 
 // Machine Performance-monitoring counters
 // PERF: pipeline
@@ -252,7 +244,7 @@
 
 // Size of LSU Request Queue
 `ifndef LSUQ_SIZE
-`define LSUQ_SIZE (`NUM_WARPS * `NUM_THREADS)
+`define LSUQ_SIZE 8
 `endif
 
 // Size of FPU Request Queue
@@ -264,7 +256,7 @@
 
 // Size of cache in bytes
 `ifndef ICACHE_SIZE
-`define ICACHE_SIZE 2048
+`define ICACHE_SIZE 16384
 `endif
 
 // Core Request Queue Size
@@ -296,12 +288,17 @@
 
 // Size of cache in bytes
 `ifndef DCACHE_SIZE
-`define DCACHE_SIZE 8192
+`define DCACHE_SIZE 16384
 `endif
 
 // Number of banks
 `ifndef DNUM_BANKS
 `define DNUM_BANKS `NUM_THREADS
+`endif
+
+// Number of bank ports
+`ifndef DNUM_PORTS
+`define DNUM_PORTS 1
 `endif
 
 // Core Request Queue Size
@@ -326,7 +323,7 @@
 
 // DRAM Response Queue Size
 `ifndef DDRSQ_SIZE
-`define DDRSQ_SIZE 4
+`define DDRSQ_SIZE `MAX(4, (`DNUM_BANKS * 2))
 `endif
 
 // SM Configurable Knobs //////////////////////////////////////////////////////
@@ -360,7 +357,7 @@
 
 // Size of cache in bytes
 `ifndef L2CACHE_SIZE
-`define L2CACHE_SIZE 131072
+`define L2CACHE_SIZE 65536
 `endif
 
 // Number of banks
@@ -380,7 +377,7 @@
 
 // Miss Handling Register Size
 `ifndef L2MSHR_SIZE
-`define L2MSHR_SIZE 8
+`define L2MSHR_SIZE 16
 `endif
 
 // DRAM Request Queue Size
@@ -390,14 +387,14 @@
 
 // DRAM Response Queue Size
 `ifndef L2DRSQ_SIZE
-`define L2DRSQ_SIZE 4
+`define L2DRSQ_SIZE `MAX(4, (`L2NUM_BANKS * 2))
 `endif
 
 // L3cache Configurable Knobs /////////////////////////////////////////////////
 
 // Size of cache in bytes
 `ifndef L3CACHE_SIZE
-`define L3CACHE_SIZE 262144
+`define L3CACHE_SIZE 131072
 `endif
 
 // Number of banks
@@ -417,7 +414,7 @@
 
 // Miss Handling Register Size
 `ifndef L3MSHR_SIZE
-`define L3MSHR_SIZE 8
+`define L3MSHR_SIZE 16
 `endif
 
 // DRAM Request Queue Size
@@ -427,7 +424,7 @@
 
 // DRAM Response Queue Size
 `ifndef L3DRSQ_SIZE
-`define L3DRSQ_SIZE 4
+`define L3DRSQ_SIZE `MAX(4, (`L3NUM_BANKS * 2))
 `endif
 
 `endif

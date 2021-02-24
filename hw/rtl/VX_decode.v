@@ -21,10 +21,10 @@ module VX_decode  #(
     wire [31:0] instr = ifetch_rsp_if.instr;
 
     reg [`ALU_BITS-1:0] alu_op;
-    reg [`BR_BITS-1:0]  br_op;    
+    reg [`BR_BITS-1:0]  br_op;   
+    reg [`MUL_BITS-1:0] mul_op; 
     reg [`LSU_BITS-1:0] lsu_op;
     reg [`CSR_BITS-1:0] csr_op;
-    reg [`MUL_BITS-1:0] mul_op;
     reg [`FPU_BITS-1:0] fpu_op;
     reg [`GPU_BITS-1:0] gpu_op;
 
@@ -71,6 +71,7 @@ module VX_decode  #(
     wire alu_shift_i          = (func3 == 3'h1) || (func3 == 3'h5);
     wire [11:0] alu_shift_imm = {{7{1'b0}}, rs2};
     wire [11:0] alu_imm       = alu_shift_i ? alu_shift_imm : u_12;
+
     always @(*) begin
         case (opcode)
             `INST_I:  src2_imm = {{20{alu_imm[11]}}, alu_imm};
@@ -89,6 +90,7 @@ module VX_decode  #(
     wire [31:0] jal_offset  = {{11{jal_imm[20]}}, jal_imm};
     wire [11:0] jalr_imm    = {func7, rs2};
     wire [31:0] jalr_offset = {{20{jalr_imm[11]}}, jalr_imm};
+
     always @(*) begin        
         case (opcode)
             `INST_JAL:  jalx_offset = jal_offset;
@@ -167,7 +169,7 @@ module VX_decode  #(
 
     // MUL   
 `ifdef EXT_M_ENABLE
-    wire is_mul = is_rtype && (func7 == 7'h1); 
+    wire is_mul = is_rtype && (func7 == 7'h1);
     always @(*) begin
         mul_op = `MUL_MUL;
         case (func3)
@@ -205,15 +207,16 @@ module VX_decode  #(
     wire is_fmvw_clss = is_fci && (func7 == 7'h70); // move to int + class
     wire is_fmvx   = is_fci && (func7 == 7'h78); // move to float
     wire is_fr4    = is_fmadd || is_fmsub || is_fnmsub || is_fnmadd;
-    wire is_fpu    = (is_fl || is_fs || is_fci || is_fr4);   
-
-    reg [2:0] frm;
-    reg if_fsqrt;
+    wire is_fpu_no_mem = is_fci || is_fr4;
+    wire is_fpu    = is_fl || is_fs || is_fci || is_fr4;
+    
+    reg [`MOD_BITS-1:0] frm;
+    reg is_fsqrt;
 
     always @(*) begin    
         fpu_op = `FPU_MISC;    
         frm = func3;
-        if_fsqrt = 0;
+        is_fsqrt = 0;
         if (is_fr4) begin
             case ({is_fmadd, is_fmsub, is_fnmsub, is_fnmadd})
                 4'b1000: fpu_op = `FPU_MADD;
@@ -230,15 +233,15 @@ module VX_decode  #(
                 7'h0C: fpu_op = `FPU_DIV;
                 7'h10: begin 
                     fpu_op = `FPU_MISC;
-                       frm = func3[1] ? 2 : (func3[0] ? 1 : 0);
+                       frm = func3[1] ? 3'b010 : {2'b0, func3[0]};
                 end
                 7'h14: begin
                     fpu_op = `FPU_MISC;
-                       frm = (func3 == 3'h0) ? 3 : 4;
+                       frm = (func3 == 3'h0) ? 3'b011 : 3'b100;
                 end
                 7'h2C: begin
                     fpu_op = `FPU_SQRT;
-                    if_fsqrt = 1;
+                    is_fsqrt = 1;
                 end
                 7'h50: fpu_op = `FPU_CMP;   // wb to intReg
                 7'h60: fpu_op = (instr[20]) ? `FPU_CVTWUS : `FPU_CVTWS; // doesn't need rs2, and read rs1 from fpReg, WB to intReg
@@ -262,7 +265,9 @@ module VX_decode  #(
     wire is_fmvx      = 0;
     wire is_fr4       = 0;
     wire is_fpu       = 0; 
+    wire is_fpu_no_mem= 0;
     wire [2:0] frm    = 0;  
+    wire is_fsqrt     = 0;
 
     always @(*) begin
         fpu_op = `FPU_MISC;
@@ -309,8 +314,8 @@ module VX_decode  #(
                 || is_gpu
                 || (is_jalr || is_btype || is_ltype || is_stype || is_itype || is_rtype || !is_csr_imm || is_gpu);
 
-    wire use_rs2 = (is_fpu && ~(is_fl || if_fsqrt || is_fcvti || is_fcvtf || is_fmvw_clss || is_fmvx))
-                || (is_gpu_bar || is_qpu_spawn)
+    wire use_rs2 = (is_fpu && ~(is_fl || is_fsqrt || is_fcvti || is_fcvtf || is_fmvw_clss || is_fmvx))
+                || (is_gpu && (is_gpu_bar || is_qpu_spawn))
                 || (is_btype || is_stype || is_rtype);
 
     wire use_rs3 = is_fr4;
@@ -325,25 +330,22 @@ module VX_decode  #(
     assign decode_if.tmask = ifetch_rsp_if.tmask;
     assign decode_if.PC    = ifetch_rsp_if.PC;
 
-    assign decode_if.ex_type = is_lsu ? `EX_LSU :
+    assign decode_if.ex_type = is_gpu ? `EX_GPU :
                                 is_csr ? `EX_CSR :
-                                    is_mul ? `EX_MUL :
-                                        is_fpu ? `EX_FPU :
-                                            is_gpu ? `EX_GPU :
-                                                is_br ? `EX_ALU :
-                                                    (is_rtype || is_itype || is_lui || is_auipc) ? `EX_ALU :
-                                                        `EX_NOP;
+                                    is_fpu_no_mem ? `EX_FPU :                                              
+                                        is_lsu ? `EX_LSU :   
+                                            (is_br || is_rtype || is_itype || is_lui || is_auipc) ? `EX_ALU :
+                                                `EX_NOP;
 
-    assign decode_if.op_type = is_lsu ? `OP_BITS'(lsu_op) :
+    assign decode_if.op_type = is_gpu ? `OP_BITS'(gpu_op) :                                
                                 is_csr ? `OP_BITS'(csr_op) :
                                     is_mul ? `OP_BITS'(mul_op) :
-                                        is_fpu ? `OP_BITS'(fpu_op) :
-                                            is_gpu ? `OP_BITS'(gpu_op) :
+                                        is_fpu_no_mem ? `OP_BITS'(fpu_op) :                                                                                                                            
+                                            is_lsu ? `OP_BITS'(lsu_op) :
                                                 is_br ? `OP_BITS'(br_op) :
-                                                    (is_rtype || is_itype || is_lui || is_auipc) ? `OP_BITS'(alu_op) :
-                                                        0;
+                                                    `OP_BITS'(alu_op);
 
-    assign decode_if.wb = use_rd;
+    assign decode_if.wb = use_rd && (decode_if.ex_type != `EX_NOP);
 
     `ifdef EXT_F_ENABLE
         wire rd_is_fp  = is_fpu && ~(is_fcmp || is_fcvti || is_fmvw_clss);
@@ -361,13 +363,10 @@ module VX_decode  #(
         assign decode_if.rs3 = rs3;
     `endif
 
-    wire is_nop = (decode_if.ex_type == `EX_NOP);
-
-    assign decode_if.used_regs = is_nop ? `NUM_REGS'(0) :
-                                 ((`NUM_REGS'(use_rd)  << decode_if.rd) 
-                                | (`NUM_REGS'(use_rs1) << decode_if.rs1) 
-                                | (`NUM_REGS'(use_rs2) << decode_if.rs2)
-                                | (`NUM_REGS'(use_rs3) << decode_if.rs3));
+    assign decode_if.used_regs = (`NUM_REGS'(use_rd)  << decode_if.rd) 
+                               | (`NUM_REGS'(use_rs1) << decode_if.rs1) 
+                               | (`NUM_REGS'(use_rs2) << decode_if.rs2)
+                               | (`NUM_REGS'(use_rs3) << decode_if.rs3);
 
     assign decode_if.imm = (is_lui || is_auipc) ? {upper_imm, 12'(0)} : 
                                 (is_jal || is_jalr || is_jals) ? jalx_offset :
@@ -375,9 +374,10 @@ module VX_decode  #(
                                         src2_imm;
 
     assign decode_if.rs1_is_PC  = is_auipc || is_btype || is_jal || is_jals;
-    assign decode_if.rs2_is_imm = is_itype || is_lui || is_auipc || is_csr_imm || is_br; 
-    
-    assign decode_if.op_mod = is_fpu ? frm : (is_br ? 1 : 0);
+    assign decode_if.rs2_is_imm = is_itype || is_lui || is_auipc || is_csr_imm || is_br;
+
+    wire [`MOD_BITS-1:0] alu_mod = {1'b0, is_mul, is_br};
+    assign decode_if.op_mod = is_fpu_no_mem ? frm : alu_mod;
 
     ///////////////////////////////////////////////////////////////////////////
 

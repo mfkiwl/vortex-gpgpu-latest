@@ -41,31 +41,27 @@ module VX_mem_unit # (
     ) dcache_dram_rsp_if(), icache_dram_rsp_if();
 
     VX_dcache_core_req_if #(
-        .NUM_REQS         (`DNUM_REQUESTS), 
-        .WORD_SIZE        (`DWORD_SIZE), 
-        .CORE_TAG_WIDTH   (`DCORE_TAG_WIDTH),
-        .CORE_TAG_ID_BITS (`DCORE_TAG_ID_BITS)
+        .NUM_REQS       (`DNUM_REQUESTS), 
+        .WORD_SIZE      (`DWORD_SIZE), 
+        .CORE_TAG_WIDTH (`DCORE_TAG_WIDTH)
     ) dcache_req_if();
 
     VX_dcache_core_rsp_if #(
-        .NUM_REQS         (`DNUM_REQUESTS), 
-        .WORD_SIZE        (`DWORD_SIZE), 
-        .CORE_TAG_WIDTH   (`DCORE_TAG_WIDTH),
-        .CORE_TAG_ID_BITS (`DCORE_TAG_ID_BITS)
+        .NUM_REQS       (`DNUM_REQUESTS), 
+        .WORD_SIZE      (`DWORD_SIZE), 
+        .CORE_TAG_WIDTH (`DCORE_TAG_WIDTH)
     ) dcache_rsp_if();
 
     VX_dcache_core_req_if #(
-        .NUM_REQS         (`DNUM_REQUESTS), 
-        .WORD_SIZE        (`DWORD_SIZE), 
-        .CORE_TAG_WIDTH   (`DCORE_TAG_WIDTH),
-        .CORE_TAG_ID_BITS (`DCORE_TAG_ID_BITS)
+        .NUM_REQS       (`DNUM_REQUESTS), 
+        .WORD_SIZE      (`DWORD_SIZE), 
+        .CORE_TAG_WIDTH (`DCORE_TAG_WIDTH)
     ) smem_req_if();
 
     VX_dcache_core_rsp_if #(
-        .NUM_REQS         (`DNUM_REQUESTS), 
-        .WORD_SIZE        (`DWORD_SIZE), 
-        .CORE_TAG_WIDTH   (`DCORE_TAG_WIDTH),
-        .CORE_TAG_ID_BITS (`DCORE_TAG_ID_BITS)
+        .NUM_REQS       (`DNUM_REQUESTS), 
+        .WORD_SIZE      (`DWORD_SIZE), 
+        .CORE_TAG_WIDTH (`DCORE_TAG_WIDTH)
     ) smem_rsp_if();
 
     VX_databus_arb databus_arb (   
@@ -323,19 +319,22 @@ end else begin
     assign perf_memsys_if.smem_bank_stalls   = 0;
 end
     
-    reg [63:0] perf_dram_lat_per_cycle;
+    reg [43:0] perf_dram_lat_per_cycle;
 
     always @(posedge clk) begin
         if (reset) begin
             perf_dram_lat_per_cycle <= 0;
         end else begin
             perf_dram_lat_per_cycle <= perf_dram_lat_per_cycle + 
-                64'($signed(2'((dram_req_if.valid && !dram_req_if.rw && dram_req_if.ready) && !(dram_rsp_if.valid && dram_rsp_if.ready)) - 
+                44'($signed(2'((dram_req_if.valid && !dram_req_if.rw && dram_req_if.ready) && !(dram_rsp_if.valid && dram_rsp_if.ready)) - 
                             2'((dram_rsp_if.valid && dram_rsp_if.ready)                    && !(dram_req_if.valid && !dram_req_if.rw && dram_req_if.ready))));
         end
     end
     
-    reg [63:0] perf_dram_reads, perf_dram_writes, perf_dram_lat, perf_dram_stalls;
+    reg [43:0] perf_dram_reads;
+    reg [43:0] perf_dram_writes;
+    reg [43:0] perf_dram_lat;
+    reg [43:0] perf_dram_stalls;
 
     always @(posedge clk) begin
         if (reset) begin       
@@ -345,13 +344,13 @@ end
             perf_dram_stalls <= 0;
         end else begin  
             if (dram_req_if.valid && dram_req_if.ready && !dram_req_if.rw) begin
-                perf_dram_reads <= perf_dram_reads + 64'd1;
+                perf_dram_reads <= perf_dram_reads + 44'd1;
             end
             if (dram_req_if.valid && dram_req_if.ready && dram_req_if.rw) begin
-                perf_dram_writes <= perf_dram_writes + 64'd1;
+                perf_dram_writes <= perf_dram_writes + 44'd1;
             end            
             if (dram_req_if.valid && !dram_req_if.ready) begin
-                perf_dram_stalls <= perf_dram_stalls + 64'd1;
+                perf_dram_stalls <= perf_dram_stalls + 44'd1;
             end       
             perf_dram_lat <= perf_dram_lat + perf_dram_lat_per_cycle;
         end

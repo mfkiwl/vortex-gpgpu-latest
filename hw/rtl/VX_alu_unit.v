@@ -12,7 +12,10 @@ module VX_alu_unit #(
     // Outputs
     VX_branch_ctl_if    branch_ctl_if,
     VX_commit_if        alu_commit_if    
-);    
+);   
+
+    `UNUSED_PARAM (CORE_ID)
+    
     reg [`NUM_THREADS-1:0][31:0]  alu_result;    
     wire [`NUM_THREADS-1:0][31:0] add_result;   
     wire [`NUM_THREADS-1:0][32:0] sub_result;
@@ -32,9 +35,9 @@ module VX_alu_unit #(
     wire [`NUM_THREADS-1:0][31:0] alu_in1 = alu_req_if.rs1_data;
     wire [`NUM_THREADS-1:0][31:0] alu_in2 = alu_req_if.rs2_data;
 
-    wire [`NUM_THREADS-1:0][31:0] alu_in1_PC   = alu_req_if.rs1_is_PC ? {`NUM_THREADS{alu_req_if.PC}} : alu_in1;
-    wire [`NUM_THREADS-1:0][31:0] alu_in2_imm  = alu_req_if.rs2_is_imm ? {`NUM_THREADS{alu_req_if.imm}} : alu_in2;
-    wire [`NUM_THREADS-1:0][31:0] alu_in2_less = (alu_req_if.rs2_is_imm && !is_br_op) ? {`NUM_THREADS{alu_req_if.imm}} : alu_in2;
+    wire [`NUM_THREADS-1:0][31:0] alu_in1_PC   = alu_req_if.use_PC ? {`NUM_THREADS{alu_req_if.PC}} : alu_in1;
+    wire [`NUM_THREADS-1:0][31:0] alu_in2_imm  = alu_req_if.use_imm ? {`NUM_THREADS{alu_req_if.imm}} : alu_in2;
+    wire [`NUM_THREADS-1:0][31:0] alu_in2_less = (alu_req_if.use_imm && !is_br_op) ? {`NUM_THREADS{alu_req_if.imm}} : alu_in2;
 
     for (genvar i = 0; i < `NUM_THREADS; i++) begin
         assign add_result[i] = alu_in1_PC[i] + alu_in2_imm[i];

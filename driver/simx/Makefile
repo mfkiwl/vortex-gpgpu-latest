@@ -21,7 +21,7 @@ LDFLAGS += -shared -pthread
 #LDFLAGS += -dynamiclib -pthread
 
 SRCS = vortex.cpp ../common/vx_utils.cpp 
-SRCS += $(SIMX_DIR)/util.cpp $(SIMX_DIR)/args.cpp $(SIMX_DIR)/mem.cpp $(SIMX_DIR)/core.cpp $(SIMX_DIR)/warp.cpp $(SIMX_DIR)/instr.cpp $(SIMX_DIR)/decode.cpp $(SIMX_DIR)/execute.cpp
+SRCS += $(SIMX_DIR)/util.cpp $(SIMX_DIR)/args.cpp $(SIMX_DIR)/mem.cpp $(SIMX_DIR)/warp.cpp $(SIMX_DIR)/core.cpp $(SIMX_DIR)/decode.cpp $(SIMX_DIR)/execute.cpp
 
 # Debugigng
 ifdef DEBUG

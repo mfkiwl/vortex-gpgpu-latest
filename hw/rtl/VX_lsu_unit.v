@@ -78,7 +78,7 @@ module VX_lsu_unit #(
     wire [`NUM_THREADS-1:0] rsp_rem_mask_n;
 
     reg [`NUM_THREADS-1:0] req_sent_mask;
-    wire req_sent_all;
+    wire sent_all_ready;
 
     wire [`DCORE_TAG_ID_BITS-1:0] mbuf_waddr, mbuf_raddr;
     wire mbuf_full;
@@ -113,17 +113,21 @@ module VX_lsu_unit #(
         .read_data    ({rsp_wid, rsp_pc, rsp_rd, rsp_wb, rsp_type, rsp_offset, rsp_is_dup}),
         .release_addr (mbuf_raddr),
         .release_slot (mbuf_pop),     
-        .full         (mbuf_full)
+        .full         (mbuf_full),
+        `UNUSED_PIN (empty)
     );
 
-    assign req_sent_all = (&(dcache_req_if.ready | req_sent_mask | ~req_tmask))
-                       || (req_is_dup & dcache_req_if.ready[0]);
+    assign sent_all_ready = (&(dcache_req_if.ready | req_sent_mask | ~req_tmask))
+                         || (req_is_dup & dcache_req_if.ready[0]);
 
     always @(posedge clk) begin
-        if (reset || req_sent_all) begin
+        if (reset) begin
             req_sent_mask <= 0;
-        end else if (!req_sent_all) begin
-            req_sent_mask <= req_sent_mask | dcache_req_fire;            
+        end else begin
+            if (sent_all_ready)
+                req_sent_mask <= 0;
+            else
+                req_sent_mask <= req_sent_mask | dcache_req_fire;            
         end
     end
 
@@ -193,11 +197,11 @@ module VX_lsu_unit #(
     assign dcache_req_if.tag = {`NUM_THREADS{req_tag}};
 `endif
     
-    assign ready_in = req_ready_dep && req_sent_all;
+    assign ready_in = req_ready_dep && sent_all_ready;
 
     // send store commit
 
-    wire is_store_rsp = req_valid && ~req_wb && req_sent_all;
+    wire is_store_rsp = req_valid && ~req_wb && sent_all_ready;
 
     assign st_commit_if.valid = is_store_rsp;
     assign st_commit_if.wid   = req_wid;
@@ -227,8 +231,8 @@ module VX_lsu_unit #(
             case (`LSU_FMT(rsp_type))
             `FMT_B:  rsp_data[i] = 32'(signed'(rsp_data_shifted[7:0]));
             `FMT_H:  rsp_data[i] = 32'(signed'(rsp_data_shifted[15:0]));
-            `FMT_BU: rsp_data[i] = 32'(rsp_data_shifted[7:0]);
-            `FMT_HU: rsp_data[i] = 32'(rsp_data_shifted[15:0]);
+            `FMT_BU: rsp_data[i] = 32'(unsigned'(rsp_data_shifted[7:0]));
+            `FMT_HU: rsp_data[i] = 32'(unsigned'(rsp_data_shifted[15:0]));
             default: rsp_data[i] = rsp_data_shifted;     
             endcase
         end        

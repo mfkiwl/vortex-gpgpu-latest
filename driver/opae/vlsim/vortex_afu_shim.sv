@@ -1,13 +1,15 @@
-`include "VX_define.vh"
+`include "VX_platform.vh"
+`IGNORE_WARNINGS_BEGIN
 `include "vortex_afu.vh"
+`IGNORE_WARNINGS_END
+`include "VX_define.vh"
+
 /* verilator lint_off IMPORTSTAR */ 
 import ccip_if_pkg::*;
 import local_mem_cfg_pkg::*;
 /* verilator lint_on IMPORTSTAR */ 
 
-module vortex_afu_shim #(
-  parameter NUM_LOCAL_MEM_BANKS = 2
-) (
+module vortex_afu_shim (
   // global signals
   input clk,
   input reset,
@@ -79,14 +81,14 @@ module vortex_afu_shim #(
   output  t_local_mem_burst_cnt avs_burstcount,
   input                         avs_readdatavalid,
 
-  output logic [$clog2(NUM_LOCAL_MEM_BANKS)-1:0] mem_bank_select
+  output logic [$clog2(`PLATFORM_PARAM_LOCAL_MEMORY_BANKS)-1:0] mem_bank_select
 );
 
 t_if_ccip_Rx cp2af_sRxPort;
 t_if_ccip_Tx af2cp_sTxPort;
 
 vortex_afu #(
-  .NUM_LOCAL_MEM_BANKS(NUM_LOCAL_MEM_BANKS)
+  .NUM_LOCAL_MEM_BANKS(`PLATFORM_PARAM_LOCAL_MEMORY_BANKS)
 ) afu (
     .clk(clk),
     .reset(reset),

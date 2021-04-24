@@ -1,8 +1,6 @@
 `ifndef VX_CONFIG
 `define VX_CONFIG
 
-`include "VX_user_config.vh"
-
 `ifndef NUM_CLUSTERS
 `define NUM_CLUSTERS 1
 `endif
@@ -36,7 +34,11 @@
 `endif
 
 `ifndef GLOBAL_BLOCK_SIZE
-`define GLOBAL_BLOCK_SIZE 64
+`ifdef PLATFORM_PARAM_LOCAL_MEMORY_DATA_WIDTH
+    `define GLOBAL_BLOCK_SIZE (`PLATFORM_PARAM_LOCAL_MEMORY_DATA_WIDTH / 8)
+`else 
+    `define GLOBAL_BLOCK_SIZE 64
+`endif
 `endif
 
 `ifndef L1_BLOCK_SIZE

@@ -1,6 +1,8 @@
 `include "VX_cache_config.vh"
 
 module VX_cache_core_req_bank_sel #(  
+    parameter CACHE_ID          = 0,
+
     // Size of line inside a bank in bytes
     parameter CACHE_LINE_SIZE   = 64, 
     // Size of a word in bytes
@@ -43,6 +45,7 @@ module VX_cache_core_req_bank_sel #(
     output wire [NUM_BANKS-1:0][CORE_TAG_WIDTH-1:0] per_bank_core_req_tag,
     input  wire [`BANK_READY_COUNT-1:0]             per_bank_core_req_ready
 );
+    `UNUSED_PARAM (CACHE_ID)
     `STATIC_ASSERT (NUM_REQS >= NUM_BANKS, ("invalid number of banks"));
 
     `UNUSED_VAR (clk)
@@ -148,7 +151,7 @@ module VX_cache_core_req_bank_sel #(
                         end
                     end
                 end
-
+                
             end else begin
 
                 always @(*) begin

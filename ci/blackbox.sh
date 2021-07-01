@@ -120,22 +120,18 @@ case $DRIVER in
         ;;
 esac
 
-case $APP in
-    basic)
-        APP_PATH=$VORTEX_HOME/driver/tests/basic
-        ;;
-    demo)
-        APP_PATH=$VORTEX_HOME/driver/tests/demo
-        ;;
-    dogfood)
-        APP_PATH=$VORTEX_HOME/driver/tests/dogfood
-        ;;
-    *)
-        APP_PATH=$VORTEX_HOME/benchmarks/opencl/$APP
-        ;;
-esac
+if [ -d "$VORTEX_HOME/tests/opencl/$APP" ];
+then
+    APP_PATH=$VORTEX_HOME/tests/opencl/$APP
+elif [ -d "$VORTEX_HOME/tests/regression/$APP" ];
+then
+    APP_PATH=$VORTEX_HOME/tests/regression/$APP
+else
+    echo "Application folder found: $APP"
+    exit -1
+fi
 
-CONFIGS="-DNUM_CLUSTERS=$CLUSTERS -DNUM_CORES=$CORES -DNUM_WARPS=$WARPS -DNUM_THREADS=$THREADS -DL2_ENABLE=$L2 -DL3_ENABLE=$L3 $PERF_FLAG"
+CONFIGS="-DNUM_CLUSTERS=$CLUSTERS -DNUM_CORES=$CORES -DNUM_WARPS=$WARPS -DNUM_THREADS=$THREADS -DL2_ENABLE=$L2 -DL3_ENABLE=$L3 $PERF_FLAG $CONFIGS"
 
 echo "CONFIGS=$CONFIGS"
 
@@ -155,6 +151,11 @@ then
         OPTS=$ARGS make -C $APP_PATH run-$DRIVER > run.log 2>&1
     else
         make -C $APP_PATH run-$DRIVER > run.log 2>&1
+    fi
+    
+    if [ -f "$APP_PATH/trace.vcd" ]
+    then 
+        mv $APP_PATH/trace.vcd .
     fi
 else
     if [ $SCOPE -eq 1 ]

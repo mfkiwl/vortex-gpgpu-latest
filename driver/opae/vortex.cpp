@@ -6,6 +6,8 @@
 #include <unistd.h>
 #include <assert.h>
 #include <cmath>
+#include <sstream>
+#include <unordered_map>
 
 #if defined(USE_FPGA) || defined(USE_ASE) 
 #include <opae/fpga.h>
@@ -37,25 +39,20 @@
 #define CMD_MEM_READ        AFU_IMAGE_CMD_MEM_READ
 #define CMD_MEM_WRITE       AFU_IMAGE_CMD_MEM_WRITE
 #define CMD_RUN             AFU_IMAGE_CMD_RUN
-#define CMD_CSR_READ        AFU_IMAGE_CMD_CSR_READ
-#define CMD_CSR_WRITE       AFU_IMAGE_CMD_CSR_WRITE
 
 #define MMIO_CMD_TYPE       (AFU_IMAGE_MMIO_CMD_TYPE * 4)
 #define MMIO_IO_ADDR        (AFU_IMAGE_MMIO_IO_ADDR * 4)
 #define MMIO_MEM_ADDR       (AFU_IMAGE_MMIO_MEM_ADDR * 4)
 #define MMIO_DATA_SIZE      (AFU_IMAGE_MMIO_DATA_SIZE * 4)
+#define MMIO_DEV_CAPS       (AFU_IMAGE_MMIO_DEV_CAPS * 4)
 #define MMIO_STATUS         (AFU_IMAGE_MMIO_STATUS * 4)
-#define MMIO_CSR_CORE       (AFU_IMAGE_MMIO_CSR_CORE * 4)
-#define MMIO_CSR_ADDR       (AFU_IMAGE_MMIO_CSR_ADDR * 4)
-#define MMIO_CSR_DATA       (AFU_IMAGE_MMIO_CSR_DATA * 4)
-#define MMIO_CSR_READ       (AFU_IMAGE_MMIO_CSR_READ * 4)
 
 ///////////////////////////////////////////////////////////////////////////////
 
 typedef struct vx_device_ {
     fpga_handle fpga;
     size_t mem_allocation;
-    unsigned implementation_id;
+    unsigned version;
     unsigned num_cores;
     unsigned num_warps;
     unsigned num_threads;
@@ -89,7 +86,7 @@ extern int vx_dev_caps(vx_device_h hdevice, unsigned caps_id, unsigned *value) {
 
     switch (caps_id) {
     case VX_CAPS_VERSION:
-        *value = device->implementation_id;
+        *value = device->version;
         break;
     case VX_CAPS_MAX_CORES:
         *value = device->num_cores;
@@ -195,21 +192,22 @@ extern int vx_dev_open(vx_device_h* hdevice) {
 
     device->fpga = accel_handle;
     device->mem_allocation = ALLOC_BASE_ADDR;
-
+    
     {   
         // Load device CAPS
-        int ret = 0;
-        ret |= vx_csr_get(device, 0, CSR_MIMPID, &device->implementation_id);
-        ret |= vx_csr_get(device, 0, CSR_NC, &device->num_cores);        
-        ret |= vx_csr_get(device, 0, CSR_NW, &device->num_warps);        
-        ret |= vx_csr_get(device, 0, CSR_NT, &device->num_threads);        
+        uint64_t dev_caps;
+        int ret = fpgaReadMMIO64(device->fpga, 0, MMIO_DEV_CAPS, &dev_caps);        
         if (ret != FPGA_OK) {
             fpgaClose(accel_handle);
             return ret;
         }
+        device->version     = (dev_caps >> 0)  & 0xffff;
+        device->num_cores   = (dev_caps >> 16) & 0xffff;
+        device->num_warps   = (dev_caps >> 32) & 0xffff;
+        device->num_threads = (dev_caps >> 48) & 0xffff;
     #ifndef NDEBUG    
         fprintf(stdout, "[VXDRV] DEVCAPS: version=%d, num_cores=%d, num_warps=%d, num_threads=%d\n", 
-                device->implementation_id, device->num_cores, device->num_warps, device->num_threads);
+                device->version, device->num_cores, device->num_warps, device->num_threads);
     #endif
     }
     
@@ -318,11 +316,6 @@ extern void* vx_host_ptr(vx_buffer_h hbuffer) {
         return nullptr;
 
     vx_buffer_t* buffer = ((vx_buffer_t*)hbuffer);
-#ifdef USE_VLSIM
-    vx_device_t *device = ((vx_device_t*)buffer->hdevice);
-    fpgaFlush(device);
-#endif
-
     return buffer->host_ptr;
 }
 
@@ -343,6 +336,8 @@ extern int vx_buf_release(vx_buffer_h hbuffer) {
 extern int vx_ready_wait(vx_device_h hdevice, long long timeout) {
     if (nullptr == hdevice)
         return -1;
+
+    std::unordered_map<int, std::stringstream> print_bufs;
     
     vx_device_t *device = ((vx_device_t*)hdevice);
 
@@ -360,14 +355,40 @@ extern int vx_ready_wait(vx_device_h hdevice, long long timeout) {
     long long sleep_time_ms = (sleep_time.tv_sec * 1000) + (sleep_time.tv_nsec / 1000000);
     
     for (;;) {
-        uint64_t data;
-        CHECK_RES(fpgaReadMMIO64(device->fpga, 0, MMIO_STATUS, &data));
-        if (0 == data || 0 == timeout) {
-            if (data != 0) {
-                fprintf(stdout, "[VXDRV] ready-wait timed out: status=%ld\n", data);
+        uint64_t status;
+        CHECK_RES(fpgaReadMMIO64(device->fpga, 0, MMIO_STATUS, &status));
+
+        uint16_t cout_data = (status >> 8) & 0xffff;
+        if (cout_data & 0x0001) {
+            do {
+                char cout_char = (cout_data >> 1) & 0xff;
+                int cout_tid = (cout_data >> 9) & 0xff;
+                auto& ss_buf = print_bufs[cout_tid];
+                ss_buf << cout_char;
+                if (cout_char == '\n') {
+                    std::cout << std::dec << "#" << cout_tid << ": " << ss_buf.str() << std::flush;
+                    ss_buf.str("");
+                }
+                CHECK_RES(fpgaReadMMIO64(device->fpga, 0, MMIO_STATUS, &status));
+                cout_data = (status >> 8) & 0xffff;
+            } while (cout_data & 0x0001);
+        }
+
+        uint8_t state = status & 0xff;
+
+        if (0 == state || 0 == timeout) {
+            for (auto& buf : print_bufs) {
+                auto str = buf.second.str();
+                if (!str.empty()) {
+                std::cout << "#" << buf.first << ": " << str << std::endl;
+                }
+            }
+            if (state != 0) {
+                fprintf(stdout, "[VXDRV] ready-wait timed out: state=%d\n", state);
             }
             break;
         }
+
         nanosleep(&sleep_time, nullptr);
         timeout -= sleep_time_ms;
     };
@@ -469,53 +490,6 @@ extern int vx_start(vx_device_h hdevice) {
   
     // start execution    
     CHECK_RES(fpgaWriteMMIO64(device->fpga, 0, MMIO_CMD_TYPE, CMD_RUN));
-
-    return 0;
-}
-
-// set device constant registers
-extern int vx_csr_set(vx_device_h hdevice, int core_id, int addr, unsigned value) {
-    if (nullptr == hdevice)
-        return -1;
-
-    vx_device_t *device = ((vx_device_t*)hdevice);
-
-    // Ensure ready for new command
-    if (vx_ready_wait(hdevice, -1) != 0)
-        return -1;    
-  
-    // write CSR value
-    CHECK_RES(fpgaWriteMMIO64(device->fpga, 0, MMIO_CSR_CORE, core_id));
-    CHECK_RES(fpgaWriteMMIO64(device->fpga, 0, MMIO_CSR_ADDR, addr));
-    CHECK_RES(fpgaWriteMMIO64(device->fpga, 0, MMIO_CSR_DATA, value));
-    CHECK_RES(fpgaWriteMMIO64(device->fpga, 0, MMIO_CMD_TYPE, CMD_CSR_WRITE));
-
-    return 0;
-}
-
-// get device constant registers
-extern int vx_csr_get(vx_device_h hdevice, int core_id, int addr, unsigned* value) {
-    if (nullptr == hdevice || nullptr == value)
-        return -1;
-
-    vx_device_t *device = ((vx_device_t*)hdevice);
-
-    // Ensure ready for new command
-    if (vx_ready_wait(hdevice, -1) != 0)
-        return -1;
-
-    // write CSR value    
-    CHECK_RES(fpgaWriteMMIO64(device->fpga, 0, MMIO_CSR_CORE, core_id));
-    CHECK_RES(fpgaWriteMMIO64(device->fpga, 0, MMIO_CSR_ADDR, addr));
-    CHECK_RES(fpgaWriteMMIO64(device->fpga, 0, MMIO_CMD_TYPE, CMD_CSR_READ));    
-
-    // Ensure ready for new command
-    if (vx_ready_wait(hdevice, -1) != 0)
-        return -1;
-
-    uint64_t value64;
-    CHECK_RES(fpgaReadMMIO64(device->fpga, 0, MMIO_CSR_READ, &value64));
-    *value = (unsigned)value64;
 
     return 0;
 }

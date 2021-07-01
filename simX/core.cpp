@@ -42,6 +42,15 @@ Core::Core(const ArchDef &arch, Decoder &decoder, MemoryUnit &mem, Word id)
   this->clear();
 }
 
+Core::~Core() {
+  for (auto& buf : print_bufs_) {
+    auto str = buf.second.str();
+    if (!str.empty()) {
+      std::cout << "#" << buf.first << ": " << str << std::endl;
+    }
+  }
+}
+
 void Core::clear() {
   for (int w = 0; w < arch_.num_warps(); ++w) {    
     in_use_iregs_[w].reset();
@@ -73,6 +82,7 @@ void Core::clear() {
   inst_in_issue_.clear();
   inst_in_execute_.clear();
   inst_in_writeback_.clear();
+  print_bufs_.clear();
 
   steps_  = 0;
   insts_  = 0;
@@ -81,19 +91,15 @@ void Core::clear() {
 
   inst_in_schedule_.valid = true;
   warps_[0]->setTmask(0, true);
+
+  ebreak_ = false;
 }
 
 void Core::step() {
-  D(3, "###########################################################");
+  D(2, "###########################################################");
 
   steps_++;
-  D(3, std::dec << "Core" << id_ << ": cycle: " << steps_);
-
-  DPH(3, "stalled warps:");
-  for (int i = 0; i < arch_.num_warps(); i++) {
-    DPN(3, " " << stalled_warps_[i]);
-  }
-  DPN(3, "\n");
+  D(2, std::dec << "Core" << id_ << ": cycle: " << steps_);
 
   this->writeback();
   this->execute();
@@ -102,7 +108,7 @@ void Core::step() {
   this->fetch();
   this->schedule();
 
-  DPN(3, std::flush);
+  DPN(2, std::flush);
 }
 
 void Core::schedule() {
@@ -126,7 +132,7 @@ void Core::schedule() {
   if (!foundSchedule)
     return;
 
-  D(3, "Schedule: wid=" << scheduled_warp);
+  D(2, "Schedule: wid=" << scheduled_warp);
   inst_in_schedule_.wid = scheduled_warp;
 
   // advance pipeline
@@ -145,11 +151,11 @@ void Core::fetch() {
 
   insts_ += active_threads_b;
   if (active_threads_b != active_threads_a) {
-    D(3, "** warp #" << wid << " active threads changed from " << active_threads_b << " to " << active_threads_a);
+    D(3, "*** warp#" << wid << " active threads changed to " << active_threads_a);
   }
 
   if (inst_in_fetch_.stall_warp) {
-    D(3, "** warp #" << wid << " stalled");
+    D(3, "*** warp#" << wid << " fetch stalled");
     stalled_warps_[wid] = true;
   }
   
@@ -176,7 +182,7 @@ void Core::issue() {
                   || (inst_in_issue_.used_vregs & in_use_vregs_) != 0;
   
   if (in_use_regs) {      
-    D(3, "Issue: registers not ready!");
+    D(3, "*** Issue: registers not ready!");
     inst_in_issue_.stalled = true;
     return;
   } 
@@ -227,7 +233,8 @@ void Core::writeback() {
   }
 
   if (inst_in_writeback_.stall_warp) {
-    stalled_warps_[inst_in_writeback_.wid] = 0;
+    stalled_warps_[inst_in_writeback_.wid] = false;
+    D(3, "*** warp#" << inst_in_writeback_.wid << " fetch released");
   }
 
   // advance pipeline
@@ -269,16 +276,16 @@ Word Core::get_csr(Addr addr, int tid, int wid) {
   } else if (addr == CSR_NC) {
     // Number of cores
     return arch_.num_cores();
-  } else if (addr == CSR_INSTRET) {
+  } else if (addr == CSR_MINSTRET) {
     // NumInsts
     return insts_;
-  } else if (addr == CSR_INSTRET_H) {
+  } else if (addr == CSR_MINSTRET_H) {
     // NumInsts
     return (Word)(insts_ >> 32);
-  } else if (addr == CSR_CYCLE) {
+  } else if (addr == CSR_MCYCLE) {
     // NumCycles
     return (Word)steps_;
-  } else if (addr == CSR_CYCLE_H) {
+  } else if (addr == CSR_MCYCLE_H) {
     // NumCycles
     return (Word)(steps_ >> 32);
   } else {
@@ -321,8 +328,8 @@ Word Core::dcache_read(Addr addr, Size size) {
   ++loads_;
   Word data = 0;
 #ifdef SM_ENABLE
-  if ((addr >= (SHARED_MEM_BASE_ADDR - SMEM_SIZE))
-   && ((addr + 3) < SHARED_MEM_BASE_ADDR)) {
+  if ((addr >= (SMEM_BASE_ADDR - SMEM_SIZE))
+   && ((addr + 3) < SMEM_BASE_ADDR)) {
      shared_mem_.read(addr & (SMEM_SIZE-1), &data, size);
      return data;
   }
@@ -334,12 +341,17 @@ Word Core::dcache_read(Addr addr, Size size) {
 void Core::dcache_write(Addr addr, Word data, Size size) {
   ++stores_;
 #ifdef SM_ENABLE
-  if ((addr >= (SHARED_MEM_BASE_ADDR - SMEM_SIZE))
-   && ((addr + 3) < SHARED_MEM_BASE_ADDR)) {
+  if ((addr >= (SMEM_BASE_ADDR - SMEM_SIZE))
+   && ((addr + 3) < SMEM_BASE_ADDR)) {
      shared_mem_.write(addr & (SMEM_SIZE-1), &data, size);
      return;
   }
 #endif
+  if (addr >= IO_COUT_ADDR 
+   && addr <= (IO_COUT_ADDR + IO_COUT_SIZE - 1)) {
+     this->writeToStdOut(addr, data);
+     return;
+  }
   mem_.write(addr, &data, size, 0);
 }
 
@@ -356,4 +368,23 @@ void Core::printStats() const {
             << "Insts : " << insts_ << std::endl
             << "Loads : " << loads_ << std::endl
             << "Stores: " << stores_ << std::endl;
+}
+
+void Core::writeToStdOut(Addr addr, Word data) {
+  uint32_t tid = (addr - IO_COUT_ADDR) & (IO_COUT_SIZE-1);
+  auto& ss_buf = print_bufs_[tid];
+  char c = (char)data;
+  ss_buf << c;
+  if (c == '\n') {
+    std::cout << std::dec << "#" << tid << ": " << ss_buf.str() << std::flush;
+    ss_buf.str("");
+  }
+}
+
+void Core::trigger_ebreak() {
+  ebreak_ = true;
+}
+
+bool Core::check_ebreak() const {
+  return ebreak_;
 }

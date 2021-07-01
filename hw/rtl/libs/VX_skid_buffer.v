@@ -4,7 +4,7 @@ module VX_skid_buffer #(
     parameter DATAW          = 1,
     parameter PASSTHRU       = 0,
     parameter NOBACKPRESSURE = 0,
-    parameter BUFFERED       = 0
+    parameter USE_FASTREG    = 0
 ) ( 
     input  wire             clk,
     input  wire             reset,
@@ -50,7 +50,7 @@ module VX_skid_buffer #(
     
     end else begin
 
-        if (BUFFERED) begin
+        if (USE_FASTREG) begin
 
             reg [DATAW-1:0] data_out_r;
             reg [DATAW-1:0] buffer;
@@ -67,8 +67,7 @@ module VX_skid_buffer #(
                 end else begin             
                     if (ready_out) begin
                         use_buffer <= 0;
-                    end
-                    if (push && !pop) begin
+                    end else if (push && valid_out_r) begin
                         assert(!use_buffer);
                         use_buffer <= 1;
                     end
@@ -81,9 +80,11 @@ module VX_skid_buffer #(
             always @(posedge clk) begin
                 if (push) begin
                     buffer <= data_in;
-                end
-                if (pop) begin
-                    data_out_r <= use_buffer ? buffer : data_in;
+                end                
+                if (pop && !use_buffer) begin
+                    data_out_r <= data_in;                    
+                end else if (ready_out) begin
+                    data_out_r <= buffer;
                 end
             end
 

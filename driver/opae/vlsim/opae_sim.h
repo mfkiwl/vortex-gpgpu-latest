@@ -1,14 +1,16 @@
 #pragma once
 
+#include "verilated.h"
+//#include "verilated_stub.h"
 #include "Vvortex_afu_shim.h"
 #include "Vvortex_afu_shim__Syms.h"
-#include "verilated.h"
 
 #ifdef VCD_OUTPUT
 #include <verilated_vcd_c.h>
 #endif
 
 #include <VX_config.h>
+#include "vortex_afu.h"
 #include "ram.h"
 
 #include <ostream>
@@ -16,7 +18,18 @@
 #include <list>
 #include <unordered_map>
 
-#define CACHE_BLOCK_SIZE 64
+#ifndef MEMORY_BANKS 
+  #ifdef PLATFORM_PARAM_LOCAL_MEMORY_BANKS
+    #define MEMORY_BANKS PLATFORM_PARAM_LOCAL_MEMORY_BANKS
+  #else
+    #define MEMORY_BANKS 2
+  #endif
+#endif
+
+#undef MEM_BLOCK_SIZE
+#define MEM_BLOCK_SIZE    (PLATFORM_PARAM_LOCAL_MEMORY_DATA_WIDTH / 8)
+
+#define CACHE_BLOCK_SIZE  64
 
 class opae_sim {
 public:
@@ -34,15 +47,13 @@ public:
 
   void read_mmio64(uint32_t mmio_num, uint64_t offset, uint64_t *value);
 
-  void flush();
-
 private: 
 
   typedef struct {
     int cycles_left;  
-    std::array<uint8_t, CACHE_BLOCK_SIZE> data;
+    std::array<uint8_t, MEM_BLOCK_SIZE> data;
     uint32_t addr;
-  } dram_rd_req_t;
+  } mem_rd_req_t;
 
   typedef struct {
     int cycles_left;  
@@ -76,8 +87,9 @@ private:
   bool stop_;
 
   std::unordered_map<int64_t, host_buffer_t> host_buffers_;
+  int64_t host_buffer_ids_;
 
-  std::list<dram_rd_req_t> dram_reads_;
+  std::list<mem_rd_req_t> mem_reads_ [MEMORY_BANKS];
 
   std::list<cci_rd_req_t> cci_reads_;
 

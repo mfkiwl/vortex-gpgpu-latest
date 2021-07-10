@@ -22,6 +22,8 @@ class Core {
 public:
   Core(const ArchDef &arch, Decoder &decoder, MemoryUnit &mem, Word id);
 
+  ~Core();
+
   void clear();
 
   bool running() const;
@@ -68,7 +70,10 @@ public:
 
   Word dcache_read(Addr, Size);
 
-  void dcache_write(Addr, Word, Size);  
+  void dcache_write(Addr, Word, Size);
+
+  void trigger_ebreak();
+  bool check_ebreak() const;
 
 private: 
 
@@ -78,7 +83,8 @@ private:
   void issue();
   void execute();
   void writeback();
-  
+
+  void writeToStdOut(Addr addr, Word data);
   
   std::vector<RegMask> in_use_iregs_;
   std::vector<RegMask> in_use_fregs_;
@@ -88,6 +94,7 @@ private:
   std::vector<WarpMask> barriers_;  
   std::vector<Word> csrs_;
   std::vector<Byte> fcsrs_;
+  std::unordered_map<int, std::stringstream> print_bufs_;
 
   Word id_;
   const ArchDef &arch_;
@@ -96,6 +103,8 @@ private:
 #ifdef SM_ENABLE
   RAM shared_mem_;
 #endif 
+
+  bool ebreak_;
 
   Pipeline inst_in_schedule_;
   Pipeline inst_in_fetch_;

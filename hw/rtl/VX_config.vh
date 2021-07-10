@@ -33,12 +33,8 @@
 `define SM_ENABLE 1
 `endif
 
-`ifndef GLOBAL_BLOCK_SIZE
-`ifdef PLATFORM_PARAM_LOCAL_MEMORY_DATA_WIDTH
-    `define GLOBAL_BLOCK_SIZE (`PLATFORM_PARAM_LOCAL_MEMORY_DATA_WIDTH / 8)
-`else 
-    `define GLOBAL_BLOCK_SIZE 64
-`endif
+`ifndef MEM_BLOCK_SIZE
+`define MEM_BLOCK_SIZE 64
 `endif
 
 `ifndef L1_BLOCK_SIZE
@@ -49,35 +45,29 @@
 `define STARTUP_ADDR 32'h80000000
 `endif
 
-`ifndef IO_BUS_BASE_ADDR
-`define IO_BUS_BASE_ADDR 32'hFF000000
+`ifndef IO_BASE_ADDR
+`define IO_BASE_ADDR 32'hFF000000
 `endif
 
-`ifndef SHARED_MEM_BASE_ADDR
-`define SHARED_MEM_BASE_ADDR `IO_BUS_BASE_ADDR
+`ifndef IO_ADDR_SIZE
+`define IO_ADDR_SIZE (32'hFFFFFFFF - `IO_BASE_ADDR + 1)
 `endif
 
-`ifndef SHARED_MEM_BASE_ADDR_ALIGN
-`define SHARED_MEM_BASE_ADDR_ALIGN 64
+`ifndef IO_COUT_ADDR
+`define IO_COUT_ADDR (32'hFFFFFFFF - `MEM_BLOCK_SIZE + 1)
 `endif
 
-`ifndef IO_BUS_ADDR_COUT
-`define IO_BUS_ADDR_COUT 32'hFFFFFFFC
+`ifndef IO_COUT_SIZE
+`define IO_COUT_SIZE `MEM_BLOCK_SIZE
 `endif
 
-`ifndef FRAME_BUFFER_BASE_ADDR
-`define FRAME_BUFFER_BASE_ADDR 32'hFF000000
+`ifndef IO_CSR_ADDR
+`define IO_CSR_ADDR `IO_BASE_ADDR
 `endif
 
-`ifndef FRAME_BUFFER_WIDTH
-`define FRAME_BUFFER_WIDTH 16'd1920
+`ifndef SMEM_BASE_ADDR
+`define SMEM_BASE_ADDR `IO_BASE_ADDR
 `endif
-
-`ifndef FRAME_BUFFER_HEIGHT
-`define FRAME_BUFFER_HEIGHT 16'd1080
-`endif
-
-`define FRAME_BUFFER_SIZE (FRAME_BUFFER_WIDTH * FRAME_BUFFER_HEIGHT)
 
 `ifndef EXT_M_DISABLE
 `define EXT_M_ENABLE
@@ -127,7 +117,7 @@
 `endif
 
 `ifndef LATENCY_FCVT
-`define LATENCY_FCVT 4
+`define LATENCY_FCVT 5
 `endif
 
 // CSR Addresses //////////////////////////////////////////////////////////////
@@ -151,28 +141,30 @@
 
 `define CSR_MEPC        12'h341
 
-// Machine Counter/Timers
-`define CSR_CYCLE       12'hC00
-`define CSR_CYCLE_H     12'hC80
-`define CSR_INSTRET     12'hC02
-`define CSR_INSTRET_H   12'hC82
-
 // Machine Performance-monitoring counters
+`define CSR_MPM_BASE                12'hB00
+`define CSR_MPM_BASE_H              12'hB80
 // PERF: pipeline
-`define CSR_MPM_IBUF_ST     12'hB03
-`define CSR_MPM_IBUF_ST_H   12'hB83
-`define CSR_MPM_SCRB_ST     12'hB04
-`define CSR_MPM_SCRB_ST_H   12'hB84
-`define CSR_MPM_ALU_ST      12'hB05
-`define CSR_MPM_ALU_ST_H    12'hB85
-`define CSR_MPM_LSU_ST      12'hB06
-`define CSR_MPM_LSU_ST_H    12'hB86
-`define CSR_MPM_CSR_ST      12'hB07
-`define CSR_MPM_CSR_ST_H    12'hB87
-`define CSR_MPM_FPU_ST      12'hB08
-`define CSR_MPM_FPU_ST_H    12'hB88
-`define CSR_MPM_GPU_ST      12'hB09
-`define CSR_MPM_GPU_ST_H    12'hB89
+`define CSR_MCYCLE                  12'hB00
+`define CSR_MCYCLE_H                12'hB80
+`define CSR_MPM_RESERVED            12'hB01
+`define CSR_MPM_RESERVED_H          12'hB81
+`define CSR_MINSTRET                12'hB02
+`define CSR_MINSTRET_H              12'hB82
+`define CSR_MPM_IBUF_ST             12'hB03
+`define CSR_MPM_IBUF_ST_H           12'hB83
+`define CSR_MPM_SCRB_ST             12'hB04
+`define CSR_MPM_SCRB_ST_H           12'hB84
+`define CSR_MPM_ALU_ST              12'hB05
+`define CSR_MPM_ALU_ST_H            12'hB85
+`define CSR_MPM_LSU_ST              12'hB06
+`define CSR_MPM_LSU_ST_H            12'hB86
+`define CSR_MPM_CSR_ST              12'hB07
+`define CSR_MPM_CSR_ST_H            12'hB87
+`define CSR_MPM_FPU_ST              12'hB08
+`define CSR_MPM_FPU_ST_H            12'hB88
+`define CSR_MPM_GPU_ST              12'hB09
+`define CSR_MPM_GPU_ST_H            12'hB89
 // PERF: icache
 `define CSR_MPM_ICACHE_READS        12'hB0A     // total reads
 `define CSR_MPM_ICACHE_READS_H      12'hB8A
@@ -200,21 +192,21 @@
 `define CSR_MPM_DCACHE_CRSP_ST      12'hB15     // core response stalls
 `define CSR_MPM_DCACHE_CRSP_ST_H    12'hB95
 // PERF: smem
-`define CSR_MPM_SMEM_READS      12'hB16     // total reads
-`define CSR_MPM_SMEM_READS_H    12'hB96
-`define CSR_MPM_SMEM_WRITES     12'hB17     // total writes
-`define CSR_MPM_SMEM_WRITES_H   12'hB97
-`define CSR_MPM_SMEM_BANK_ST    12'hB18     // bank conflicts stalls
-`define CSR_MPM_SMEM_BANK_ST_H  12'hB98
+`define CSR_MPM_SMEM_READS          12'hB16     // total reads
+`define CSR_MPM_SMEM_READS_H        12'hB96
+`define CSR_MPM_SMEM_WRITES         12'hB17     // total writes
+`define CSR_MPM_SMEM_WRITES_H       12'hB97
+`define CSR_MPM_SMEM_BANK_ST        12'hB18     // bank conflicts stalls
+`define CSR_MPM_SMEM_BANK_ST_H      12'hB98
 // PERF: memory
-`define CSR_MPM_DRAM_READS      12'hB19     // dram reads
-`define CSR_MPM_DRAM_READS_H    12'hB99
-`define CSR_MPM_DRAM_WRITES     12'hB1A     // dram writes
-`define CSR_MPM_DRAM_WRITES_H   12'hB9A
-`define CSR_MPM_DRAM_ST         12'hB1B     // dram request stalls
-`define CSR_MPM_DRAM_ST_H       12'hB9B
-`define CSR_MPM_DRAM_LAT        12'hB1C     // dram latency (total)
-`define CSR_MPM_DRAM_LAT_H      12'hB9C
+`define CSR_MPM_MEM_READS           12'hB19     // memory reads
+`define CSR_MPM_MEM_READS_H         12'hB99
+`define CSR_MPM_MEM_WRITES          12'hB1A     // memory writes
+`define CSR_MPM_MEM_WRITES_H        12'hB9A
+`define CSR_MPM_MEM_ST              12'hB1B     // memory request stalls
+`define CSR_MPM_MEM_ST_H            12'hB9B
+`define CSR_MPM_MEM_LAT             12'hB1C     // memory latency (total)
+`define CSR_MPM_MEM_LAT_H           12'hB9C
 
 // Machine Information Registers
 `define CSR_MVENDORID   12'hF11
@@ -239,7 +231,7 @@
 
 // Size of LSU Request Queue
 `ifndef LSUQ_SIZE
-`define LSUQ_SIZE 8
+`define LSUQ_SIZE (`NUM_WARPS * 2)
 `endif
 
 // Size of FPU Request Queue
@@ -264,14 +256,14 @@
 `define IMSHR_SIZE `NUM_WARPS
 `endif
 
-// DRAM Request Queue Size
-`ifndef IDREQ_SIZE
-`define IDREQ_SIZE 4
+// Memory Request Queue Size
+`ifndef IMREQ_SIZE
+`define IMREQ_SIZE 4
 `endif
 
-// DRAM Response Queue Size
-`ifndef IDRSQ_SIZE
-`define IDRSQ_SIZE 4
+// Memory Response Queue Size
+`ifndef IMRSQ_SIZE
+`define IMRSQ_SIZE 4
 `endif
 
 // Dcache Configurable Knobs //////////////////////////////////////////////////
@@ -301,14 +293,14 @@
 `define DMSHR_SIZE `LSUQ_SIZE
 `endif
 
-// DRAM Request Queue Size
-`ifndef DDREQ_SIZE
-`define DDREQ_SIZE 4
+// Memory Request Queue Size
+`ifndef DMREQ_SIZE
+`define DMREQ_SIZE 4
 `endif
 
-// DRAM Response Queue Size
-`ifndef DDRSQ_SIZE
-`define DDRSQ_SIZE `MAX(4, (`DNUM_BANKS * 2))
+// Memory Response Queue Size
+`ifndef DMRSQ_SIZE
+`define DMRSQ_SIZE `MAX(4, `DNUM_BANKS)
 `endif
 
 // SM Configurable Knobs //////////////////////////////////////////////////////
@@ -337,7 +329,7 @@
 
 // Size of cache in bytes
 `ifndef L2CACHE_SIZE
-`define L2CACHE_SIZE 65536
+`define L2CACHE_SIZE 131072
 `endif
 
 // Number of banks
@@ -355,21 +347,21 @@
 `define L2MSHR_SIZE 16
 `endif
 
-// DRAM Request Queue Size
-`ifndef L2DREQ_SIZE
-`define L2DREQ_SIZE 4
+// L2 Request Queue Size
+`ifndef L2MREQ_SIZE
+`define L2MREQ_SIZE 4
 `endif
 
-// DRAM Response Queue Size
-`ifndef L2DRSQ_SIZE
-`define L2DRSQ_SIZE `MAX(4, (`L2NUM_BANKS * 2))
+// L2 Response Queue Size
+`ifndef L2MRSQ_SIZE
+`define L2MRSQ_SIZE `MAX(4, (`L2NUM_BANKS * 2))
 `endif
 
 // L3cache Configurable Knobs /////////////////////////////////////////////////
 
 // Size of cache in bytes
 `ifndef L3CACHE_SIZE
-`define L3CACHE_SIZE 131072
+`define L3CACHE_SIZE 1048576
 `endif
 
 // Number of banks
@@ -387,14 +379,14 @@
 `define L3MSHR_SIZE 16
 `endif
 
-// DRAM Request Queue Size
-`ifndef L3DREQ_SIZE
-`define L3DREQ_SIZE 4
+// L3 Request Queue Size
+`ifndef L3MREQ_SIZE
+`define L3MREQ_SIZE 4
 `endif
 
-// DRAM Response Queue Size
-`ifndef L3DRSQ_SIZE
-`define L3DRSQ_SIZE `MAX(4, (`L3NUM_BANKS * 2))
+// L3 Response Queue Size
+`ifndef L3MRSQ_SIZE
+`define L3MRSQ_SIZE `MAX(4, (`L3NUM_BANKS * 2))
 `endif
 
 `endif

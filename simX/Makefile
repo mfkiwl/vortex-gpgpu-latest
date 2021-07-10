@@ -1,11 +1,9 @@
 #CXXFLAGS += -std=c++11 -O2 -Wall -Wextra -Wfatal-errors 
 CXXFLAGS += -std=c++11 -g -O0 -Wall -Wextra -Wfatal-errors
 
-CXXFLAGS += -Wno-aligned-new -Wno-maybe-uninitialized
+CXXFLAGS += -Wno-maybe-uninitialized
 CXXFLAGS += -I. -I../hw
 CXXFLAGS += -DDUMP_PERF_STATS
-
-LDFLAGS +=
 
 TOP = vx_cache_sim
 
@@ -17,7 +15,7 @@ SRCS = util.cpp args.cpp mem.cpp pipeline.cpp warp.cpp core.cpp decode.cpp execu
 
 # Debugigng
 ifdef DEBUG
-	CXXFLAGS += $(DBG_FLAGS)
+	CXXFLAGS += -DDEBUG_LEVEL=3
 else    
 	CXXFLAGS += -DNDEBUG
 endif
@@ -26,11 +24,6 @@ all: $(PROJECT)
 
 $(PROJECT): $(SRCS)
 	$(CXX) $(CXXFLAGS) $^ $(LDFLAGS) -o $@
-
-run:
-	./test_rv32i.sh
-	./test_rv32f.sh
-	./test_runtime.sh
 
 .depend: $(SRCS)
 	$(CXX) $(CXXFLAGS) -MM $^ > .depend;

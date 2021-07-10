@@ -25,7 +25,7 @@ module VX_alu_unit #(
     wire stall_in, stall_out;    
 
     `UNUSED_VAR (alu_req_if.op_mod)
-    wire               is_br_op = `IS_BR_MOD(alu_req_if.op_mod);
+    wire               is_br_op = `ALU_IS_BR(alu_req_if.op_mod);
     wire [`ALU_BITS-1:0] alu_op = `ALU_OP(alu_req_if.op_type);
     wire [`BR_BITS-1:0]   br_op = `BR_OP(alu_req_if.op_type);
     wire             alu_signed = `ALU_SIGNED(alu_op);   
@@ -51,20 +51,17 @@ module VX_alu_unit #(
 
     for (genvar i = 0; i < `NUM_THREADS; i++) begin    
         wire [32:0] shr_in1 = {alu_signed & alu_in1[i][31], alu_in1[i]};
-    `IGNORE_WARNINGS_BEGIN
-        wire [32:0] shr_value = $signed(shr_in1) >>> alu_in2_imm[i][4:0]; 
-    `IGNORE_WARNINGS_END
-        assign shr_result[i] = shr_value[31:0];
+        assign shr_result[i] = 32'($signed(shr_in1) >>> alu_in2_imm[i][4:0]);
     end        
 
     for (genvar i = 0; i < `NUM_THREADS; i++) begin 
         always @(*) begin
             case (alu_op)
-                `ALU_AND:   msc_result[i] = alu_in1[i] & alu_in2_imm[i];
-                `ALU_OR:    msc_result[i] = alu_in1[i] | alu_in2_imm[i];
-                `ALU_XOR:   msc_result[i] = alu_in1[i] ^ alu_in2_imm[i];                
+                `ALU_AND: msc_result[i] = alu_in1[i] & alu_in2_imm[i];
+                `ALU_OR:  msc_result[i] = alu_in1[i] | alu_in2_imm[i];
+                `ALU_XOR: msc_result[i] = alu_in1[i] ^ alu_in2_imm[i];                
                 //`ALU_SLL,
-                default:    msc_result[i] = alu_in1[i] << alu_in2_imm[i][4:0];
+                default:  msc_result[i] = alu_in1[i] << alu_in2_imm[i][4:0];
             endcase
         end
     end
@@ -117,7 +114,7 @@ module VX_alu_unit #(
     wire                          mul_wb;
     wire [`NUM_THREADS-1:0][31:0] mul_data;
 
-    wire is_mul_op = `IS_MUL_MOD(alu_req_if.op_mod);
+    wire is_mul_op = `ALU_IS_MUL(alu_req_if.op_mod);
     
     VX_muldiv muldiv (
         .clk        (clk),

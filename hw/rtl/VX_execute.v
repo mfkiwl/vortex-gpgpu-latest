@@ -6,11 +6,7 @@ module VX_execute #(
     `SCOPE_IO_VX_execute
 
     input wire clk, 
-    input wire reset, 
-
-    // CSR io interface
-    VX_csr_io_req_if    csr_io_req_if,
-    VX_csr_io_rsp_if    csr_io_rsp_if,    
+    input wire reset,    
 
     // Dcache interface
     VX_dcache_core_req_if dcache_req_if,
@@ -20,7 +16,7 @@ module VX_execute #(
     VX_cmt_to_csr_if    cmt_to_csr_if,
 
 `ifdef PERF_ENABLE
-    VX_perf_memsys_if    perf_memsys_if,
+    VX_perf_memsys_if   perf_memsys_if,
     VX_perf_pipeline_if perf_pipeline_if,
  `endif
     
@@ -41,29 +37,37 @@ module VX_execute #(
     VX_commit_if        fpu_commit_if,
     VX_commit_if        gpu_commit_if,
     
-    input wire          busy,
-    output wire         ebreak
+    input wire          busy
 );
     VX_fpu_to_csr_if     fpu_to_csr_if(); 
     wire[`NUM_WARPS-1:0] csr_pending;
     wire[`NUM_WARPS-1:0] fpu_pending;
+
+    wire alu_reset, lsu_reset, csr_reset, fpu_reset, gpu_reset;
+    VX_reset_relay #(
+        .NUM_NODES (5)
+    ) reset_relay (
+        .clk     (clk),
+        .reset   (reset),
+        .reset_o ({alu_reset, lsu_reset, csr_reset, fpu_reset, gpu_reset})
+    );
     
     VX_alu_unit #(
-        .CORE_ID(CORE_ID)
+        .CORE_ID (CORE_ID)
     ) alu_unit (
         .clk            (clk),
-        .reset          (reset),
+        .reset          (alu_reset),
         .alu_req_if     (alu_req_if),
         .branch_ctl_if  (branch_ctl_if),
         .alu_commit_if  (alu_commit_if)
     );
 
     VX_lsu_unit #(
-        .CORE_ID(CORE_ID)
+        .CORE_ID (CORE_ID)
     ) lsu_unit (
         `SCOPE_BIND_VX_execute_lsu_unit
         .clk            (clk),
-        .reset          (reset),
+        .reset          (lsu_reset),
         .dcache_req_if  (dcache_req_if),
         .dcache_rsp_if  (dcache_rsp_if),
         .lsu_req_if     (lsu_req_if),
@@ -72,18 +76,16 @@ module VX_execute #(
     );
 
     VX_csr_unit #(
-        .CORE_ID(CORE_ID)
+        .CORE_ID (CORE_ID)
     ) csr_unit (
         .clk            (clk),
-        .reset          (reset),   
+        .reset          (csr_reset),   
     `ifdef PERF_ENABLE
-        .perf_memsys_if  (perf_memsys_if),
+        .perf_memsys_if (perf_memsys_if),
         .perf_pipeline_if (perf_pipeline_if),
     `endif    
         .cmt_to_csr_if  (cmt_to_csr_if),    
         .fpu_to_csr_if  (fpu_to_csr_if), 
-        .csr_io_req_if  (csr_io_req_if),           
-        .csr_io_rsp_if  (csr_io_rsp_if),
         .csr_req_if     (csr_req_if),   
         .csr_commit_if  (csr_commit_if),
         .fpu_pending    (fpu_pending),
@@ -93,10 +95,10 @@ module VX_execute #(
 
 `ifdef EXT_F_ENABLE
     VX_fpu_unit #(
-        .CORE_ID(CORE_ID)
+        .CORE_ID (CORE_ID)
     ) fpu_unit (
         .clk            (clk),
-        .reset          (reset),        
+        .reset          (fpu_reset),        
         .fpu_req_if     (fpu_req_if), 
         .fpu_to_csr_if  (fpu_to_csr_if), 
         .fpu_commit_if  (fpu_commit_if),
@@ -104,6 +106,7 @@ module VX_execute #(
         .pending        (fpu_pending) 
     );
 `else
+    `UNUSED_VAR (fpu_reset)
     `UNUSED_VAR (csr_pending)
     `UNUSED_VAR (fpu_to_csr_if.read_frm)
     assign fpu_req_if.ready     = 0;
@@ -122,18 +125,20 @@ module VX_execute #(
 `endif
 
     VX_gpu_unit #(
-        .CORE_ID(CORE_ID)
+        .CORE_ID (CORE_ID)
     ) gpu_unit (
         `SCOPE_BIND_VX_execute_gpu_unit
         .clk            (clk),
-        .reset          (reset),    
+        .reset          (gpu_reset),    
         .gpu_req_if     (gpu_req_if),
         .warp_ctl_if    (warp_ctl_if),
         .gpu_commit_if  (gpu_commit_if)
     );
 
-    assign ebreak = alu_req_if.valid 
-                 && `IS_BR_MOD(alu_req_if.op_mod)
+    // special workaround to get RISC-V tests Pass/Fail status
+    wire ebreak /* verilator public */;
+    assign ebreak = alu_req_if.valid && alu_req_if.ready
+                 && `ALU_IS_BR(alu_req_if.op_mod)
                  && (`BR_OP(alu_req_if.op_type) == `BR_EBREAK 
                   || `BR_OP(alu_req_if.op_type) == `BR_ECALL);
 

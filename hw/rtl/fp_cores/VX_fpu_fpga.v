@@ -48,44 +48,41 @@ module VX_fpu_fpga #(
     reg do_madd, do_sub, do_neg, is_itof, is_signed;
 
     always @(*) begin
-        do_madd   = 'x;
-        do_sub    = 'x;        
-        do_neg    = 'x;
-        is_itof   = 'x;
-        is_signed = 'x;
+        do_madd   = 0;
+        do_sub    = 0;        
+        do_neg    = 0;
+        is_itof   = 0;
+        is_signed = 0;
         case (op_type)
-            `FPU_ADD:    begin core_select = FPU_FMA; do_madd = 0; do_sub = 0; do_neg = 0; end
-            `FPU_SUB:    begin core_select = FPU_FMA; do_madd = 0; do_sub = 1; do_neg = 0; end
-            `FPU_MUL:    begin core_select = FPU_FMA; do_madd = 0; do_sub = 0; do_neg = 1; end
-            `FPU_MADD:   begin core_select = FPU_FMA; do_madd = 1; do_sub = 0; do_neg = 0; end
-            `FPU_MSUB:   begin core_select = FPU_FMA; do_madd = 1; do_sub = 1; do_neg = 0; end
-            `FPU_NMADD:  begin core_select = FPU_FMA; do_madd = 1; do_sub = 0; do_neg = 1; end
+            `FPU_ADD:    begin core_select = FPU_FMA; end
+            `FPU_SUB:    begin core_select = FPU_FMA; do_sub = 1; end
+            `FPU_MUL:    begin core_select = FPU_FMA; do_neg = 1; end
+            `FPU_MADD:   begin core_select = FPU_FMA; do_madd = 1; end
+            `FPU_MSUB:   begin core_select = FPU_FMA; do_madd = 1; do_sub = 1; end
+            `FPU_NMADD:  begin core_select = FPU_FMA; do_madd = 1; do_neg = 1; end
             `FPU_NMSUB:  begin core_select = FPU_FMA; do_madd = 1; do_sub = 1; do_neg = 1; end
             `FPU_DIV:    begin core_select = FPU_DIV; end
             `FPU_SQRT:   begin core_select = FPU_SQRT; end
-            `FPU_CVTWS:  begin core_select = FPU_CVT; is_itof = 0; is_signed = 1; end
-            `FPU_CVTWUS: begin core_select = FPU_CVT; is_itof = 0; is_signed = 0; end
+            `FPU_CVTWS:  begin core_select = FPU_CVT; is_signed = 1; end
+            `FPU_CVTWUS: begin core_select = FPU_CVT; end
             `FPU_CVTSW:  begin core_select = FPU_CVT; is_itof = 1; is_signed = 1; end
-            `FPU_CVTSWU: begin core_select = FPU_CVT; is_itof = 1; is_signed = 0; end
+            `FPU_CVTSWU: begin core_select = FPU_CVT; is_itof = 1; end
             default:     begin core_select = FPU_NCP; end
         endcase
     end
 
-    wire [NUM_FPC-1:0] fpu_reset;
-    VX_reset_relay #(
-        .NUM_NODES(NUM_FPC)
-    ) reset_relay (
-        .clk     (clk),
-        .reset   (reset),
-        .reset_o (fpu_reset)
-    );
+    `RESET_RELAY (fma_reset);
+    `RESET_RELAY (div_reset);
+    `RESET_RELAY (sqrt_reset);
+    `RESET_RELAY (cvt_reset);
+    `RESET_RELAY (ncp_reset);
 
     VX_fp_fma #(
         .TAGW (TAGW),
         .LANES(`NUM_THREADS)
     ) fp_fma (
         .clk        (clk), 
-        .reset      (fpu_reset[FPU_FMA]),   
+        .reset      (fma_reset),   
         .valid_in   (valid_in && (core_select == FPU_FMA)),
         .ready_in   (per_core_ready_in[FPU_FMA]),    
         .tag_in     (tag_in),  
@@ -109,7 +106,7 @@ module VX_fpu_fpga #(
         .LANES(`NUM_THREADS)
     ) fp_div (
         .clk        (clk), 
-        .reset      (fpu_reset[FPU_DIV]),   
+        .reset      (div_reset),   
         .valid_in   (valid_in && (core_select == FPU_DIV)),
         .ready_in   (per_core_ready_in[FPU_DIV]),    
         .tag_in     (tag_in),
@@ -129,7 +126,7 @@ module VX_fpu_fpga #(
         .LANES(`NUM_THREADS)
     ) fp_sqrt (
         .clk        (clk), 
-        .reset      (fpu_reset[FPU_SQRT]),   
+        .reset      (sqrt_reset),   
         .valid_in   (valid_in && (core_select == FPU_SQRT)),
         .ready_in   (per_core_ready_in[FPU_SQRT]),    
         .tag_in     (tag_in),
@@ -148,7 +145,7 @@ module VX_fpu_fpga #(
         .LANES(`NUM_THREADS)
     ) fp_cvt (
         .clk        (clk), 
-        .reset      (fpu_reset[FPU_CVT]),   
+        .reset      (cvt_reset),   
         .valid_in   (valid_in && (core_select == FPU_CVT)),
         .ready_in   (per_core_ready_in[FPU_CVT]),    
         .tag_in     (tag_in), 
@@ -169,7 +166,7 @@ module VX_fpu_fpga #(
         .LANES(`NUM_THREADS)
     ) fp_ncomp (
         .clk        (clk),
-        .reset      (fpu_reset[FPU_NCP]),   
+        .reset      (ncp_reset),   
         .valid_in   (valid_in && (core_select == FPU_NCP)),
         .ready_in   (per_core_ready_in[FPU_NCP]),        
         .tag_in     (tag_in),        

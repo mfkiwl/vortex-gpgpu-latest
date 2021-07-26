@@ -37,8 +37,6 @@ module vortex_afu #(
   input                         avs_readdatavalid [NUM_LOCAL_MEM_BANKS]
 );
 
-localparam RESET_DELAY        = 3;  
-
 localparam LMEM_LINE_WIDTH    = $bits(t_local_mem_data);
 localparam LMEM_ADDR_WIDTH    = $bits(t_local_mem_addr);
 localparam LMEM_BURST_CTRW    = $bits(t_local_mem_burst_cnt);
@@ -47,7 +45,7 @@ localparam CCI_LINE_WIDTH     = $bits(t_ccip_clData);
 localparam CCI_LINE_SIZE      = CCI_LINE_WIDTH / 8;
 localparam CCI_ADDR_WIDTH     = 32 - $clog2(CCI_LINE_SIZE);
 
-localparam AVS_RD_QUEUE_SIZE  = 16;
+localparam AVS_RD_QUEUE_SIZE  = 4;
 localparam AVS_REQ_TAGW_VX    = `MAX(`VX_MEM_TAG_WIDTH, `VX_MEM_TAG_WIDTH + $clog2(LMEM_LINE_WIDTH) - $clog2(`VX_MEM_LINE_WIDTH));
 localparam AVS_REQ_TAGW_CCI   = `MAX(CCI_ADDR_WIDTH, CCI_ADDR_WIDTH + $clog2(LMEM_LINE_WIDTH) - $clog2(CCI_LINE_WIDTH));
 localparam AVS_REQ_TAGW       = `MAX(AVS_REQ_TAGW_VX, AVS_REQ_TAGW_CCI);
@@ -170,7 +168,7 @@ wire [2:0] cmd_type = (cp2af_sRxPort.c0.mmioWrValid
 
 // disable assertions until full reset
 `ifndef VERILATOR
-reg [$clog2(RESET_DELAY+1)-1:0] assert_delay_ctr;
+reg [$clog2(`RESET_DELAY+1)-1:0] assert_delay_ctr;
 initial begin
   $assertoff;  
 end
@@ -179,7 +177,7 @@ always @(posedge clk) begin
     assert_delay_ctr <= 0;
   end else begin
     assert_delay_ctr <= assert_delay_ctr + 1;
-    if (assert_delay_ctr == RESET_DELAY) begin
+    if (assert_delay_ctr == (`RESET_DELAY-1)) begin
       $asserton; // enable assertions
     end
   end
@@ -293,7 +291,7 @@ reg  cmd_write_done;
 wire cmd_run_done;
 reg  vx_started;
 
-reg [$clog2(RESET_DELAY+1)-1:0] vx_reset_ctr;
+reg [$clog2(`RESET_DELAY+1)-1:0] vx_reset_ctr;
 always @(posedge clk) begin
   if (state == STATE_IDLE) begin
     vx_reset_ctr <= 0;
@@ -365,7 +363,7 @@ always @(posedge clk) begin
           `endif
           end
         end else begin
-          if (vx_reset_ctr == $bits(vx_reset_ctr)'(RESET_DELAY)) begin
+          if (vx_reset_ctr == (`RESET_DELAY-1)) begin
             vx_started <= 1;
             vx_reset   <= 0;
           end  
@@ -741,8 +739,9 @@ always @(posedge clk) begin
 end
 
 VX_fifo_queue #(
-  .DATAW   (CCI_RD_QUEUE_DATAW),
-  .SIZE    (CCI_RD_QUEUE_SIZE)
+  .DATAW    (CCI_RD_QUEUE_DATAW),
+  .SIZE     (CCI_RD_QUEUE_SIZE),
+  .BUFFERED (1)
 ) cci_rd_req_queue (
   .clk      (clk),
   .reset    (reset),
@@ -924,12 +923,12 @@ VX_onehot_encoder #(
 ) cout_tid_enc (
   .data_in  (vx_mem_req_byteen),
   .data_out (cout_tid),
-  `UNUSED_PIN (valid)
+  `UNUSED_PIN (valid_out)
 );
 
 VX_onehot_mux #(
   .DATAW (8),
-  .COUNT (`VX_MEM_BYTEEN_WIDTH)
+  .N     (`VX_MEM_BYTEEN_WIDTH)
 ) cout_char_mux (
   .data_in  (vx_mem_req_data),
   .sel_in   (vx_mem_req_byteen),

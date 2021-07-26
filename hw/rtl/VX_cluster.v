@@ -44,24 +44,17 @@ module VX_cluster #(
 
     wire [`NUM_CORES-1:0]                       per_core_busy;
 
-    wire [`NUM_CORES-1:0] core_reset;
-    VX_reset_relay #(
-        .DEPTH (`NUM_CORES > 1),
-        .NUM_NODES (`NUM_CORES)
-    ) reset_relay (
-        .clk     (clk),
-        .reset   (reset),
-        .reset_o (core_reset)
-    );
-
     for (genvar i = 0; i < `NUM_CORES; i++) begin
+
+        `RESET_RELAY (core_reset);
+
         VX_core #(
             .CORE_ID(i + (CLUSTER_ID * `NUM_CORES))
         ) core (
             `SCOPE_BIND_VX_cluster_core(i)
 
             .clk            (clk),
-            .reset          (core_reset[i]),
+            .reset          (core_reset),
 
             .mem_req_valid  (per_core_mem_req_valid[i]),
             .mem_req_rw     (per_core_mem_req_rw   [i]),                
@@ -87,6 +80,8 @@ module VX_cluster #(
         VX_perf_cache_if perf_l2cache_if();
     `endif
 
+        `RESET_RELAY (l2_reset);
+
         VX_cache #(
             .CACHE_ID           (`L2CACHE_ID),
             .CACHE_SIZE         (`L2CACHE_SIZE),
@@ -95,6 +90,7 @@ module VX_cluster #(
             .WORD_SIZE          (`L2WORD_SIZE),
             .NUM_REQS           (`L2NUM_REQS),
             .CREQ_SIZE          (`L2CREQ_SIZE),
+            .CRSQ_SIZE          (`L2CRSQ_SIZE),
             .MSHR_SIZE          (`L2MSHR_SIZE),
             .MRSQ_SIZE          (`L2MRSQ_SIZE),
             .MREQ_SIZE          (`L2MREQ_SIZE),
@@ -107,7 +103,7 @@ module VX_cluster #(
             `SCOPE_BIND_VX_cluster_l2cache
               
             .clk                (clk),
-            .reset              (reset),
+            .reset              (l2_reset),
 
         `ifdef PERF_ENABLE
             .perf_cache_if      (perf_l2cache_if),
@@ -127,6 +123,7 @@ module VX_cluster #(
             .core_rsp_data      (per_core_mem_rsp_data),
             .core_rsp_tag       (per_core_mem_rsp_tag),
             .core_rsp_ready     (per_core_mem_rsp_ready),
+            `UNUSED_PIN (core_rsp_tmask),
 
             // Memory request
             .mem_req_valid      (mem_req_valid),

@@ -19,7 +19,8 @@ module VX_pipeline #(
     input wire [`NUM_THREADS-1:0]           dcache_req_ready,
 
     // Dcache core reponse    
-    input wire [`NUM_THREADS-1:0]           dcache_rsp_valid,
+    input wire                              dcache_rsp_valid,
+    input wire [`NUM_THREADS-1:0]           dcache_rsp_tmask,
     input wire [`NUM_THREADS-1:0][31:0]     dcache_rsp_data,
     input wire [`DCORE_TAG_WIDTH-1:0]       dcache_rsp_tag,    
     output wire                             dcache_rsp_ready,      
@@ -72,6 +73,7 @@ module VX_pipeline #(
     ) dcache_core_rsp_if();
 
     assign dcache_core_rsp_if.valid = dcache_rsp_valid;
+    assign dcache_core_rsp_if.tmask = dcache_rsp_tmask;
     assign dcache_core_rsp_if.data  = dcache_rsp_data;
     assign dcache_core_rsp_if.tag   = dcache_rsp_tag;
     assign dcache_rsp_ready = dcache_core_rsp_if.ready;
@@ -130,12 +132,18 @@ module VX_pipeline #(
     VX_perf_pipeline_if perf_pipeline_if();
 `endif
 
+    `RESET_RELAY (fetch_reset);
+    `RESET_RELAY (decode_reset);
+    `RESET_RELAY (issue_reset);
+    `RESET_RELAY (execute_reset);
+    `RESET_RELAY (commit_reset);
+
     VX_fetch #(
         .CORE_ID(CORE_ID)
     ) fetch (
         `SCOPE_BIND_VX_pipeline_fetch
         .clk            (clk),
-        .reset          (reset),
+        .reset          (fetch_reset),
         .icache_req_if  (icache_core_req_if),
         .icache_rsp_if  (icache_core_rsp_if), 
         .wstall_if      (wstall_if),
@@ -150,7 +158,7 @@ module VX_pipeline #(
         .CORE_ID(CORE_ID)
     ) decode (
         .clk            (clk),
-        .reset          (reset),        
+        .reset          (decode_reset),        
         .ifetch_rsp_if  (ifetch_rsp_if),
         .decode_if      (decode_if),
         .wstall_if      (wstall_if),
@@ -163,7 +171,7 @@ module VX_pipeline #(
         `SCOPE_BIND_VX_pipeline_issue
 
         .clk            (clk),
-        .reset          (reset),        
+        .reset          (issue_reset),
 
     `ifdef PERF_ENABLE
         .perf_pipeline_if (perf_pipeline_if),
@@ -185,7 +193,7 @@ module VX_pipeline #(
         `SCOPE_BIND_VX_pipeline_execute
         
         .clk            (clk),
-        .reset          (reset),    
+        .reset          (execute_reset),
 
     `ifdef PERF_ENABLE
         .perf_memsys_if (perf_memsys_if),
@@ -219,7 +227,7 @@ module VX_pipeline #(
         .CORE_ID(CORE_ID)
     ) commit (
         .clk            (clk),
-        .reset          (reset),
+        .reset          (commit_reset),
 
         .alu_commit_if  (alu_commit_if),
         .ld_commit_if   (ld_commit_if),        

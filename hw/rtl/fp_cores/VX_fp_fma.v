@@ -84,9 +84,11 @@ module VX_fp_fma #(
             .data_out (result[i])
         );
     `else
+        `RESET_RELAY (fma_reset);
+
         acl_fmadd fmadd (
             .clk    (clk),
-            .areset (reset),
+            .areset (fma_reset),
             .en     (enable),
             .a      (a),
             .b      (b),

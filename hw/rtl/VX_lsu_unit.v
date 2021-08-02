@@ -9,8 +9,8 @@ module VX_lsu_unit #(
     input wire reset,
 
    // Dcache interface
-    VX_dcache_core_req_if dcache_req_if,
-    VX_dcache_core_rsp_if dcache_rsp_if,
+    VX_dcache_req_if dcache_req_if,
+    VX_dcache_rsp_if dcache_rsp_if,
 
     // inputs
     VX_lsu_req_if   lsu_req_if,
@@ -120,7 +120,7 @@ module VX_lsu_unit #(
 
     wire [`NUM_THREADS-1:0] dcache_req_fire = dcache_req_if.valid & dcache_req_if.ready;
 
-    wire dcache_rsp_fire = (| dcache_rsp_if.valid) && dcache_rsp_if.ready;
+    wire dcache_rsp_fire = dcache_rsp_if.valid && dcache_rsp_if.ready;
 
     wire mbuf_push = (| dcache_req_fire)                  
                   && is_req_start   // first submission only                  
@@ -177,7 +177,7 @@ module VX_lsu_unit #(
         end
     end    
 
-    assign rsp_rem_mask_n = rsp_rem_mask[mbuf_raddr] & ~dcache_rsp_if.valid;
+    assign rsp_rem_mask_n = rsp_rem_mask[mbuf_raddr] & ~dcache_rsp_if.tmask;
 
     always @(posedge clk) begin
         if (mbuf_push)  begin
@@ -212,11 +212,12 @@ module VX_lsu_unit #(
         end
 
         always @(*) begin
+            mem_req_data = req_data[i];
             case (req_offset[i])
-                1:       mem_req_data[31:8]  = req_data[i][23:0];
-                2:       mem_req_data[31:16] = req_data[i][15:0];
-                3:       mem_req_data[31:24] = req_data[i][7:0];
-                default: mem_req_data        = req_data[i];
+                1: mem_req_data[31:8]  = req_data[i][23:0];
+                2: mem_req_data[31:16] = req_data[i][15:0];
+                3: mem_req_data[31:24] = req_data[i][7:0];
+                default:;
             endcase
         end
 
@@ -269,7 +270,7 @@ module VX_lsu_unit #(
         end        
     end   
 
-    assign rsp_tmask_qual = rsp_is_dup ? rsp_tmask : dcache_rsp_if.valid;
+    assign rsp_tmask_qual = rsp_is_dup ? rsp_tmask : dcache_rsp_if.tmask;
 
     // send load commit
 
@@ -282,8 +283,8 @@ module VX_lsu_unit #(
         .clk      (clk),
         .reset    (reset),
         .enable   (!load_rsp_stall),
-        .data_in  ({(| dcache_rsp_if.valid), rsp_wid,          rsp_tmask_qual,     rsp_pc,          rsp_rd,          rsp_wb,          rsp_data,          mbuf_pop}),
-        .data_out ({ld_commit_if.valid,      ld_commit_if.wid, ld_commit_if.tmask, ld_commit_if.PC, ld_commit_if.rd, ld_commit_if.wb, ld_commit_if.data, ld_commit_if.eop})
+        .data_in  ({dcache_rsp_if.valid, rsp_wid,          rsp_tmask_qual,     rsp_pc,          rsp_rd,          rsp_wb,          rsp_data,          mbuf_pop}),
+        .data_out ({ld_commit_if.valid,  ld_commit_if.wid, ld_commit_if.tmask, ld_commit_if.PC, ld_commit_if.rd, ld_commit_if.wb, ld_commit_if.data, ld_commit_if.eop})
     );
 
     // Can accept new cache response?
@@ -298,25 +299,36 @@ module VX_lsu_unit #(
     `SCOPE_ASSIGN (dcache_req_byteen,dcache_req_if.byteen);
     `SCOPE_ASSIGN (dcache_req_data,  dcache_req_if.data);
     `SCOPE_ASSIGN (dcache_req_tag,   req_tag);
-    `SCOPE_ASSIGN (dcache_rsp_fire,  dcache_rsp_if.valid & {`NUM_THREADS{dcache_rsp_if.ready}});
+    `SCOPE_ASSIGN (dcache_rsp_fire,  dcache_rsp_if.tmask & {`NUM_THREADS{dcache_rsp_fire}});
     `SCOPE_ASSIGN (dcache_rsp_data,  dcache_rsp_if.data);
     `SCOPE_ASSIGN (dcache_rsp_tag,   mbuf_raddr);
-    
-`ifdef DBG_PRINT_CORE_DCACHE
-`IGNORE_WARNINGS_BEGIN
-    reg [`LSUQ_SIZE-1:0][`DCORE_TAG_WIDTH:0] pending_reqs;
-`IGNORE_WARNINGS_END
+
+`ifndef SYNTHESIS
+    reg [`LSUQ_SIZE-1:0][(`NW_BITS + 32 + 64 + 1)-1:0] pending_reqs;
+    wire [63:0] delay_timeout = 10000 * (1 ** (`L2_ENABLE + `L3_ENABLE));
 
     always @(posedge clk) begin
         if (reset) begin
             pending_reqs <= '0;
-        end else if (mbuf_push) begin            
-            pending_reqs[mbuf_waddr] <= {dcache_req_if.tag[0], 1'b1};
-        end else if (mbuf_pop) begin            
-            pending_reqs[mbuf_raddr] <= '0;
+        end begin
+            if (mbuf_push) begin            
+                pending_reqs[mbuf_waddr] <= {req_wid, req_pc, $time, 1'b1};
+            end
+            if (mbuf_pop) begin
+                pending_reqs[mbuf_raddr] <= '0;
+            end
+        end
+
+        for (integer i = 0; i < `LSUQ_SIZE; ++i) begin
+            if (pending_reqs[i][0]) begin 
+                assert(($time - pending_reqs[i][1 +: 64]) < delay_timeout) else
+                    $error("%t: *** D$%0d response timeout: wid=%0d, PC=%0h", $time, CORE_ID, pending_reqs[i][1+64+32 +: `NW_BITS], pending_reqs[i][1+64 +: 32]);
+            end
         end
     end
-
+`endif
+    
+`ifdef DBG_PRINT_CORE_DCACHE
    always @(posedge clk) begin     
         if (lsu_req_if.valid && fence_wait)  begin
             $display("%t: *** D$%0d fence wait", $time, CORE_ID);
@@ -339,19 +351,10 @@ module VX_lsu_unit #(
             end
         end
         if (dcache_rsp_fire) begin
-            $write("%t: D$%0d Rsp: valid=%b, wid=%0d, PC=%0h, tag=%0h, rd=%0d, data=", 
-                $time, CORE_ID, dcache_rsp_if.valid, rsp_wid, rsp_pc, mbuf_raddr, rsp_rd);
+            $write("%t: D$%0d Rsp: tmask=%b, wid=%0d, PC=%0h, tag=%0h, rd=%0d, data=", 
+                $time, CORE_ID, dcache_rsp_if.tmask, rsp_wid, rsp_pc, mbuf_raddr, rsp_rd);
             `PRINT_ARRAY1D(dcache_rsp_if.data, `NUM_THREADS);
             $write(", is_dup=%b\n", rsp_is_dup);
-        end
-        if (mbuf_full) begin
-            $write("%t: *** D$%0d queue-full:", $time, CORE_ID);
-            for (integer j = 0; j < `LSUQ_SIZE; j++) begin
-                if (pending_reqs[j][0]) begin
-                    $write(" %0d->%0h", j, pending_reqs[j][1 +: `DCORE_TAG_WIDTH]);
-                end
-            end            
-            $write("\n");
         end
     end
 `endif

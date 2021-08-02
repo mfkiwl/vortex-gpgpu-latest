@@ -6,24 +6,24 @@
 module VX_onehot_encoder #(
     parameter N       = 1,    
     parameter REVERSE = 0,
-    parameter FAST    = 1,
+    parameter MODEL   = 1,
     parameter LN      = `LOG2UP(N)
 ) (
     input wire [N-1:0]   data_in,    
     output wire [LN-1:0] data_out,
-    output wire          valid
+    output wire          valid_out
 ); 
     if (N == 1) begin
 
-        assign data_out = data_in;
-        assign valid    = data_in;
+        assign data_out  = data_in;
+        assign valid_out = data_in;
 
     end else if (N == 2) begin
 
-        assign data_out = data_in[!REVERSE];
-        assign valid    = (| data_in);
+        assign data_out  = data_in[!REVERSE];
+        assign valid_out = (| data_in);
 
-    end else if (FAST) begin
+    end else if (MODEL == 1) begin
     `IGNORE_WARNINGS_BEGIN
         localparam levels_lp = $clog2(N);
         localparam aligned_width_lp = 1 << $clog2(N);
@@ -60,14 +60,28 @@ module VX_onehot_encoder #(
         end	
     
         assign data_out = addr[levels_lp][`LOG2UP(N)-1:0];
-        assign valid = (| data_in);
+        assign valid_out = v[levels_lp][0];
     `IGNORE_WARNINGS_END
-    end else begin 
+    end else if (MODEL == 2) begin 
+
+        for (genvar j = 0; j < LN; ++j) begin
+            wire [N-1:0] mask;
+            for (genvar i = 0; i < N; ++i) begin
+            `IGNORE_WARNINGS_BEGIN
+                wire [LN-1:0] i_w = i;
+            `IGNORE_WARNINGS_END
+                assign mask[i] = i_w[j];
+            end
+            assign data_out[j] = |(mask & data_in);
+        end
+
+        assign valid_out = (| data_in);
+
+    end else begin
 
         reg [LN-1:0] index_r;
 
         if (REVERSE) begin
-
             always @(*) begin        
                 index_r = 'x; 
                 for (integer i = N-1; i >= 0; --i) begin
@@ -76,7 +90,6 @@ module VX_onehot_encoder #(
                     end
                 end
             end
-
         end else begin
             always @(*) begin        
                 index_r = 'x; 
@@ -88,8 +101,8 @@ module VX_onehot_encoder #(
             end
         end
 
-        assign data_out = index_r;
-        assign valid    = (| data_in);
+        assign data_out  = index_r;
+        assign valid_out = (| data_in);
     end
 
 endmodule

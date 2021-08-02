@@ -12,13 +12,13 @@ module Vortex (
     output wire                             mem_req_rw,    
     output wire [`VX_MEM_BYTEEN_WIDTH-1:0]  mem_req_byteen,    
     output wire [`VX_MEM_ADDR_WIDTH-1:0]    mem_req_addr,
-    output wire [`VX_MEM_LINE_WIDTH-1:0]    mem_req_data,
+    output wire [`VX_MEM_DATA_WIDTH-1:0]    mem_req_data,
     output wire [`VX_MEM_TAG_WIDTH-1:0]     mem_req_tag,
     input  wire                             mem_req_ready,
 
     // Memory response    
     input wire                              mem_rsp_valid,        
-    input wire [`VX_MEM_LINE_WIDTH-1:0]     mem_rsp_data,
+    input wire [`VX_MEM_DATA_WIDTH-1:0]     mem_rsp_data,
     input wire [`VX_MEM_TAG_WIDTH-1:0]      mem_rsp_tag,
     output wire                             mem_rsp_ready,
 
@@ -31,12 +31,12 @@ module Vortex (
     wire [`NUM_CLUSTERS-1:0]                         per_cluster_mem_req_rw;
     wire [`NUM_CLUSTERS-1:0][`L2MEM_BYTEEN_WIDTH-1:0] per_cluster_mem_req_byteen;
     wire [`NUM_CLUSTERS-1:0][`L2MEM_ADDR_WIDTH-1:0]  per_cluster_mem_req_addr;
-    wire [`NUM_CLUSTERS-1:0][`L2MEM_LINE_WIDTH-1:0]  per_cluster_mem_req_data;
+    wire [`NUM_CLUSTERS-1:0][`L2MEM_DATA_WIDTH-1:0]  per_cluster_mem_req_data;
     wire [`NUM_CLUSTERS-1:0][`L2MEM_TAG_WIDTH-1:0]   per_cluster_mem_req_tag;
     wire [`NUM_CLUSTERS-1:0]                         per_cluster_mem_req_ready;
 
     wire [`NUM_CLUSTERS-1:0]                         per_cluster_mem_rsp_valid;
-    wire [`NUM_CLUSTERS-1:0][`L2MEM_LINE_WIDTH-1:0]  per_cluster_mem_rsp_data;
+    wire [`NUM_CLUSTERS-1:0][`L2MEM_DATA_WIDTH-1:0]  per_cluster_mem_rsp_data;
     wire [`NUM_CLUSTERS-1:0][`L2MEM_TAG_WIDTH-1:0]   per_cluster_mem_rsp_tag;
     wire [`NUM_CLUSTERS-1:0]                         per_cluster_mem_rsp_ready;
 
@@ -44,14 +44,7 @@ module Vortex (
 
     for (genvar i = 0; i < `NUM_CLUSTERS; i++) begin
 
-        wire cluster_reset;
-        VX_reset_relay #(
-            .DEPTH (`NUM_CLUSTERS > 1)
-        ) reset_relay (
-            .clk     (clk),
-            .reset   (reset),
-            .reset_o (cluster_reset)
-        );
+        `RESET_RELAY (cluster_reset);
 
         VX_cluster #(
             .CLUSTER_ID(i)
@@ -85,6 +78,8 @@ module Vortex (
         VX_perf_cache_if perf_l3cache_if();
     `endif
 
+        `RESET_RELAY (l3_reset);
+
         VX_cache #(
             .CACHE_ID           (`L3CACHE_ID),
             .CACHE_SIZE         (`L3CACHE_SIZE),
@@ -93,6 +88,7 @@ module Vortex (
             .WORD_SIZE          (`L3WORD_SIZE),
             .NUM_REQS           (`L3NUM_REQS),
             .CREQ_SIZE          (`L3CREQ_SIZE),
+            .CRSQ_SIZE          (`L3CRSQ_SIZE),
             .MSHR_SIZE          (`L3MSHR_SIZE),
             .MRSQ_SIZE          (`L3MRSQ_SIZE),
             .MREQ_SIZE          (`L3MREQ_SIZE),
@@ -105,7 +101,7 @@ module Vortex (
             `SCOPE_BIND_Vortex_l3cache
  
             .clk                (clk),
-            .reset              (reset),
+            .reset              (l3_reset),
 
         `ifdef PERF_ENABLE
             .perf_cache_if      (perf_l3cache_if),
@@ -125,6 +121,7 @@ module Vortex (
             .core_rsp_data      (per_cluster_mem_rsp_data),
             .core_rsp_tag       (per_cluster_mem_rsp_tag),              
             .core_rsp_ready     (per_cluster_mem_rsp_ready),
+            `UNUSED_PIN (core_rsp_tmask),
 
             // Memory request
             .mem_req_valid      (mem_req_valid),
@@ -146,7 +143,7 @@ module Vortex (
 
         VX_mem_arb #(
             .NUM_REQS       (`NUM_CLUSTERS),
-            .DATA_WIDTH     (`L3MEM_LINE_WIDTH),            
+            .DATA_WIDTH     (`L3MEM_DATA_WIDTH),            
             .ADDR_WIDTH     (`L3MEM_ADDR_WIDTH),
             .TAG_IN_WIDTH   (`L2MEM_TAG_WIDTH),
             .BUFFERED_REQ   (1),

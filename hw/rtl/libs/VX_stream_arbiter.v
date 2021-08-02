@@ -22,9 +22,8 @@ module VX_stream_arbiter #(
     localparam LOG_NUM_REQS = $clog2(NUM_REQS);
 
     if (NUM_REQS > 1)  begin
-        wire                    sel_enable;
         wire                    sel_valid;
-        wire [LOG_NUM_REQS-1:0] sel_idx;
+        wire                    sel_ready;
         wire [NUM_REQS-1:0]     sel_1hot;
 
         if (TYPE == "X") begin
@@ -35,10 +34,10 @@ module VX_stream_arbiter #(
                 .clk          (clk),
                 .reset        (reset),
                 .requests     (valid_in),  
-                .enable       (sel_enable),     
+                .enable       (sel_ready),     
                 .grant_valid  (sel_valid),
-                .grant_index  (sel_idx),
-                .grant_onehot (sel_1hot)
+                .grant_onehot (sel_1hot),
+				`UNUSED_PIN (grant_index)
             );
         end else if (TYPE == "R") begin
             VX_rr_arbiter #(
@@ -48,10 +47,10 @@ module VX_stream_arbiter #(
                 .clk          (clk),
                 .reset        (reset),
                 .requests     (valid_in),  
-                .enable       (sel_enable),
+                .enable       (sel_ready),
                 .grant_valid  (sel_valid),
-                .grant_index  (sel_idx),
-                .grant_onehot (sel_1hot)
+                .grant_onehot (sel_1hot),
+				`UNUSED_PIN (grant_index)
             );
         end else if (TYPE == "F") begin
             VX_fair_arbiter #(
@@ -61,10 +60,10 @@ module VX_stream_arbiter #(
                 .clk          (clk),
                 .reset        (reset),
                 .requests     (valid_in),  
-                .enable       (sel_enable),     
+                .enable       (sel_ready),     
                 .grant_valid  (sel_valid),
-                .grant_index  (sel_idx),
-                .grant_onehot (sel_1hot)
+                .grant_onehot (sel_1hot),
+				`UNUSED_PIN (grant_index)
             );
         end else if (TYPE == "M") begin
             VX_matrix_arbiter #(
@@ -74,36 +73,44 @@ module VX_stream_arbiter #(
                 .clk          (clk),
                 .reset        (reset),
                 .requests     (valid_in),  
-                .enable       (sel_enable),     
+                .enable       (sel_ready),     
                 .grant_valid  (sel_valid),
-                .grant_index  (sel_idx),
-                .grant_onehot (sel_1hot)
+                .grant_onehot (sel_1hot),
+				`UNUSED_PIN (grant_index)
             );
         end else begin
             $error ("invalid parameter");
         end
 
-        wire ready_in_sel;           
+        wire [DATAW-1:0] data_in_sel;
+
+        VX_onehot_mux #(
+            .DATAW (DATAW),
+            .N     (NUM_REQS)
+        ) data_in_mux (
+            .data_in  (data_in),
+            .sel_in   (sel_1hot),
+            .data_out (data_in_sel)
+        );
 
         VX_skid_buffer #(
-            .DATAW    (DATAW),
-            .PASSTHRU (!BUFFERED)
+            .DATAW      (DATAW),
+            .PASSTHRU   (0 == BUFFERED),
+            .OUTPUT_REG (2 == BUFFERED)
         ) out_buffer (
             .clk       (clk),
             .reset     (reset),
             .valid_in  (sel_valid),        
-            .data_in   (data_in[sel_idx]),
-            .ready_in  (ready_in_sel),      
+            .data_in   (data_in_sel),
+            .ready_in  (sel_ready),      
             .valid_out (valid_out),
             .data_out  (data_out),
             .ready_out (ready_out)
         );
 
-        assign sel_enable = ready_in_sel;
-
         for (genvar i = 0; i < NUM_REQS; i++) begin
-            assign ready_in[i] = sel_1hot[i] && ready_in_sel;
-        end      
+            assign ready_in[i] = sel_1hot[i] && sel_ready;
+        end
 
     end else begin
     
@@ -112,7 +119,7 @@ module VX_stream_arbiter #(
         
         assign valid_out = valid_in;        
         assign data_out  = data_in;
-        assign ready_in  = ready_out;        
+        assign ready_in  = ready_out;
 
     end
     

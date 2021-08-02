@@ -9,8 +9,8 @@ module VX_execute #(
     input wire reset,    
 
     // Dcache interface
-    VX_dcache_core_req_if dcache_req_if,
-    VX_dcache_core_rsp_if dcache_rsp_if,
+    VX_dcache_req_if    dcache_req_if,
+    VX_dcache_rsp_if    dcache_rsp_if,
 
     // commit status
     VX_cmt_to_csr_if    cmt_to_csr_if,
@@ -42,23 +42,28 @@ module VX_execute #(
     VX_fpu_to_csr_if     fpu_to_csr_if(); 
     wire[`NUM_WARPS-1:0] csr_pending;
     wire[`NUM_WARPS-1:0] fpu_pending;
+
+    `RESET_RELAY (alu_reset);
+    `RESET_RELAY (lsu_reset);
+    `RESET_RELAY (csr_reset);
+    `RESET_RELAY (gpu_reset);
     
     VX_alu_unit #(
-        .CORE_ID(CORE_ID)
+        .CORE_ID (CORE_ID)
     ) alu_unit (
         .clk            (clk),
-        .reset          (reset),
+        .reset          (alu_reset),
         .alu_req_if     (alu_req_if),
         .branch_ctl_if  (branch_ctl_if),
         .alu_commit_if  (alu_commit_if)
     );
 
     VX_lsu_unit #(
-        .CORE_ID(CORE_ID)
+        .CORE_ID (CORE_ID)
     ) lsu_unit (
         `SCOPE_BIND_VX_execute_lsu_unit
         .clk            (clk),
-        .reset          (reset),
+        .reset          (lsu_reset),
         .dcache_req_if  (dcache_req_if),
         .dcache_rsp_if  (dcache_rsp_if),
         .lsu_req_if     (lsu_req_if),
@@ -67,12 +72,12 @@ module VX_execute #(
     );
 
     VX_csr_unit #(
-        .CORE_ID(CORE_ID)
+        .CORE_ID (CORE_ID)
     ) csr_unit (
         .clk            (clk),
-        .reset          (reset),   
+        .reset          (csr_reset),   
     `ifdef PERF_ENABLE
-        .perf_memsys_if  (perf_memsys_if),
+        .perf_memsys_if (perf_memsys_if),
         .perf_pipeline_if (perf_pipeline_if),
     `endif    
         .cmt_to_csr_if  (cmt_to_csr_if),    
@@ -85,11 +90,13 @@ module VX_execute #(
     );
 
 `ifdef EXT_F_ENABLE
+    `RESET_RELAY (fpu_reset);
+
     VX_fpu_unit #(
-        .CORE_ID(CORE_ID)
+        .CORE_ID (CORE_ID)
     ) fpu_unit (
         .clk            (clk),
-        .reset          (reset),        
+        .reset          (fpu_reset),        
         .fpu_req_if     (fpu_req_if), 
         .fpu_to_csr_if  (fpu_to_csr_if), 
         .fpu_commit_if  (fpu_commit_if),
@@ -115,11 +122,11 @@ module VX_execute #(
 `endif
 
     VX_gpu_unit #(
-        .CORE_ID(CORE_ID)
+        .CORE_ID (CORE_ID)
     ) gpu_unit (
         `SCOPE_BIND_VX_execute_gpu_unit
         .clk            (clk),
-        .reset          (reset),    
+        .reset          (gpu_reset),    
         .gpu_req_if     (gpu_req_if),
         .warp_ctl_if    (warp_ctl_if),
         .gpu_commit_if  (gpu_commit_if)

@@ -19,7 +19,8 @@ module VX_pipeline #(
     input wire [`NUM_THREADS-1:0]           dcache_req_ready,
 
     // Dcache core reponse    
-    input wire [`NUM_THREADS-1:0]           dcache_rsp_valid,
+    input wire                              dcache_rsp_valid,
+    input wire [`NUM_THREADS-1:0]           dcache_rsp_tmask,
     input wire [`NUM_THREADS-1:0][31:0]     dcache_rsp_data,
     input wire [`DCORE_TAG_WIDTH-1:0]       dcache_rsp_tag,    
     output wire                             dcache_rsp_ready,      
@@ -47,62 +48,63 @@ module VX_pipeline #(
     // Dcache request
     //
 
-    VX_dcache_core_req_if #(
-        .NUM_REQS(`NUM_THREADS), 
-        .WORD_SIZE(4), 
-        .CORE_TAG_WIDTH(`DCORE_TAG_WIDTH)
-    ) dcache_core_req_if();
+    VX_dcache_req_if #(
+        .NUM_REQS  (`NUM_THREADS), 
+        .WORD_SIZE (4), 
+        .TAG_WIDTH (`DCORE_TAG_WIDTH)
+    ) dcache_req_if();
 
-    assign dcache_req_valid  = dcache_core_req_if.valid;
-    assign dcache_req_rw     = dcache_core_req_if.rw;
-    assign dcache_req_byteen = dcache_core_req_if.byteen;
-    assign dcache_req_addr   = dcache_core_req_if.addr;
-    assign dcache_req_data   = dcache_core_req_if.data;
-    assign dcache_req_tag    = dcache_core_req_if.tag;
-    assign dcache_core_req_if.ready = dcache_req_ready;
+    assign dcache_req_valid  = dcache_req_if.valid;
+    assign dcache_req_rw     = dcache_req_if.rw;
+    assign dcache_req_byteen = dcache_req_if.byteen;
+    assign dcache_req_addr   = dcache_req_if.addr;
+    assign dcache_req_data   = dcache_req_if.data;
+    assign dcache_req_tag    = dcache_req_if.tag;
+    assign dcache_req_if.ready = dcache_req_ready;
  
     //
     // Dcache response
     //
 
-    VX_dcache_core_rsp_if #(
-        .NUM_REQS(`NUM_THREADS), 
-        .WORD_SIZE(4), 
-        .CORE_TAG_WIDTH(`DCORE_TAG_WIDTH)
-    ) dcache_core_rsp_if();
+    VX_dcache_rsp_if #(
+        .NUM_REQS  (`NUM_THREADS), 
+        .WORD_SIZE (4), 
+        .TAG_WIDTH (`DCORE_TAG_WIDTH)
+    ) dcache_rsp_if();
 
-    assign dcache_core_rsp_if.valid = dcache_rsp_valid;
-    assign dcache_core_rsp_if.data  = dcache_rsp_data;
-    assign dcache_core_rsp_if.tag   = dcache_rsp_tag;
-    assign dcache_rsp_ready = dcache_core_rsp_if.ready;
+    assign dcache_rsp_if.valid = dcache_rsp_valid;
+    assign dcache_rsp_if.tmask = dcache_rsp_tmask;
+    assign dcache_rsp_if.data  = dcache_rsp_data;
+    assign dcache_rsp_if.tag   = dcache_rsp_tag;
+    assign dcache_rsp_ready = dcache_rsp_if.ready;
 
     //
     // Icache request
     //
 
-    VX_icache_core_req_if #(
-        .WORD_SIZE(4), 
-        .CORE_TAG_WIDTH(`ICORE_TAG_WIDTH)
-    ) icache_core_req_if();       
+    VX_icache_req_if #(
+        .WORD_SIZE (4), 
+        .TAG_WIDTH (`ICORE_TAG_WIDTH)
+    ) icache_req_if();       
 
-    assign icache_req_valid  = icache_core_req_if.valid;
-    assign icache_req_addr   = icache_core_req_if.addr;
-    assign icache_req_tag    = icache_core_req_if.tag;
-    assign icache_core_req_if.ready = icache_req_ready;
+    assign icache_req_valid  = icache_req_if.valid;
+    assign icache_req_addr   = icache_req_if.addr;
+    assign icache_req_tag    = icache_req_if.tag;
+    assign icache_req_if.ready = icache_req_ready;
 
     //
     // Icache response
     //
 
-    VX_icache_core_rsp_if #(
-        .WORD_SIZE(4), 
-        .CORE_TAG_WIDTH(`ICORE_TAG_WIDTH)
-    ) icache_core_rsp_if();    
+    VX_icache_rsp_if #(
+        .WORD_SIZE (4), 
+        .TAG_WIDTH (`ICORE_TAG_WIDTH)
+    ) icache_rsp_if();    
 
-    assign icache_core_rsp_if.valid = icache_rsp_valid;
-    assign icache_core_rsp_if.data  = icache_rsp_data;
-    assign icache_core_rsp_if.tag   = icache_rsp_tag;
-    assign icache_rsp_ready = icache_core_rsp_if.ready;
+    assign icache_rsp_if.valid = icache_rsp_valid;
+    assign icache_rsp_if.data  = icache_rsp_data;
+    assign icache_rsp_if.tag   = icache_rsp_tag;
+    assign icache_rsp_ready = icache_rsp_if.ready;
 
     ///////////////////////////////////////////////////////////////////////////
 
@@ -130,14 +132,20 @@ module VX_pipeline #(
     VX_perf_pipeline_if perf_pipeline_if();
 `endif
 
+    `RESET_RELAY (fetch_reset);
+    `RESET_RELAY (decode_reset);
+    `RESET_RELAY (issue_reset);
+    `RESET_RELAY (execute_reset);
+    `RESET_RELAY (commit_reset);
+
     VX_fetch #(
         .CORE_ID(CORE_ID)
     ) fetch (
         `SCOPE_BIND_VX_pipeline_fetch
         .clk            (clk),
-        .reset          (reset),
-        .icache_req_if  (icache_core_req_if),
-        .icache_rsp_if  (icache_core_rsp_if), 
+        .reset          (fetch_reset),
+        .icache_req_if  (icache_req_if),
+        .icache_rsp_if  (icache_rsp_if), 
         .wstall_if      (wstall_if),
         .join_if        (join_if),        
         .warp_ctl_if    (warp_ctl_if),
@@ -150,7 +158,7 @@ module VX_pipeline #(
         .CORE_ID(CORE_ID)
     ) decode (
         .clk            (clk),
-        .reset          (reset),        
+        .reset          (decode_reset),        
         .ifetch_rsp_if  (ifetch_rsp_if),
         .decode_if      (decode_if),
         .wstall_if      (wstall_if),
@@ -163,7 +171,7 @@ module VX_pipeline #(
         `SCOPE_BIND_VX_pipeline_issue
 
         .clk            (clk),
-        .reset          (reset),        
+        .reset          (issue_reset),
 
     `ifdef PERF_ENABLE
         .perf_pipeline_if (perf_pipeline_if),
@@ -185,15 +193,15 @@ module VX_pipeline #(
         `SCOPE_BIND_VX_pipeline_execute
         
         .clk            (clk),
-        .reset          (reset),    
+        .reset          (execute_reset),
 
     `ifdef PERF_ENABLE
         .perf_memsys_if (perf_memsys_if),
         .perf_pipeline_if (perf_pipeline_if),
     `endif 
 
-        .dcache_req_if  (dcache_core_req_if),
-        .dcache_rsp_if  (dcache_core_rsp_if),
+        .dcache_req_if  (dcache_req_if),
+        .dcache_rsp_if  (dcache_rsp_if),
 
         .cmt_to_csr_if  (cmt_to_csr_if),                 
         
@@ -219,7 +227,7 @@ module VX_pipeline #(
         .CORE_ID(CORE_ID)
     ) commit (
         .clk            (clk),
-        .reset          (reset),
+        .reset          (commit_reset),
 
         .alu_commit_if  (alu_commit_if),
         .ld_commit_if   (ld_commit_if),        

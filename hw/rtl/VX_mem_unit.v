@@ -5,73 +5,66 @@ module VX_mem_unit # (
 ) (
     `SCOPE_IO_VX_mem_unit
 
-    input wire              clk,
-    input wire              reset,
+    input wire          clk,
+    input wire          reset,
     
 `ifdef PERF_ENABLE
-    VX_perf_memsys_if       perf_memsys_if,
+    VX_perf_memsys_if   perf_memsys_if,
 `endif
 
     // Core <-> Dcache    
-    VX_dcache_core_req_if   dcache_core_req_if,
-    VX_dcache_core_rsp_if   dcache_core_rsp_if,
+    VX_dcache_req_if    dcache_req_if,
+    VX_dcache_rsp_if    dcache_rsp_if,
     
     // Core <-> Icache    
-    VX_icache_core_req_if   icache_core_req_if,  
-    VX_icache_core_rsp_if   icache_core_rsp_if,
+    VX_icache_req_if    icache_req_if,  
+    VX_icache_rsp_if    icache_rsp_if,
 
     // Memory
-    VX_cache_mem_req_if     mem_req_if,
-    VX_cache_mem_rsp_if     mem_rsp_if
+    VX_mem_req_if       mem_req_if,
+    VX_mem_rsp_if       mem_rsp_if
 );
     
 `ifdef PERF_ENABLE
     VX_perf_cache_if perf_icache_if(), perf_dcache_if(), perf_smem_if();
 `endif
 
-    VX_cache_mem_req_if #(
-        .MEM_LINE_WIDTH (`IMEM_LINE_WIDTH),
-        .MEM_ADDR_WIDTH (`IMEM_ADDR_WIDTH),
-        .MEM_TAG_WIDTH  (`IMEM_TAG_WIDTH)
+    VX_mem_req_if #(
+        .DATA_WIDTH (`IMEM_DATA_WIDTH),
+        .ADDR_WIDTH (`IMEM_ADDR_WIDTH),
+        .TAG_WIDTH  (`IMEM_TAG_WIDTH)
     ) icache_mem_req_if();
 
-    VX_cache_mem_rsp_if #(
-        .MEM_LINE_WIDTH (`IMEM_LINE_WIDTH),
-        .MEM_TAG_WIDTH  (`IMEM_TAG_WIDTH)
+    VX_mem_rsp_if #(
+        .DATA_WIDTH (`IMEM_DATA_WIDTH),
+        .TAG_WIDTH  (`IMEM_TAG_WIDTH)
     ) icache_mem_rsp_if();
 
-    VX_cache_mem_req_if #(
-        .MEM_LINE_WIDTH (`DMEM_LINE_WIDTH),
-        .MEM_ADDR_WIDTH (`DMEM_ADDR_WIDTH),
-        .MEM_TAG_WIDTH  (`DMEM_TAG_WIDTH)
+    VX_mem_req_if #(
+        .DATA_WIDTH (`DMEM_DATA_WIDTH),
+        .ADDR_WIDTH (`DMEM_ADDR_WIDTH),
+        .TAG_WIDTH  (`DMEM_TAG_WIDTH)
     ) dcache_mem_req_if();
 
-    VX_cache_mem_rsp_if #(
-        .MEM_LINE_WIDTH (`DMEM_LINE_WIDTH),
-        .MEM_TAG_WIDTH  (`DMEM_TAG_WIDTH)
+    VX_mem_rsp_if #(
+        .DATA_WIDTH (`DMEM_DATA_WIDTH),
+        .TAG_WIDTH  (`DMEM_TAG_WIDTH)
     ) dcache_mem_rsp_if();
 
-    VX_dcache_core_req_if #(
-        .NUM_REQS       (`DNUM_REQS), 
-        .WORD_SIZE      (`DWORD_SIZE), 
-        .CORE_TAG_WIDTH (`DCORE_TAG_WIDTH-`SM_ENABLE)
-    ) dcache_req_if();
+    VX_dcache_req_if #(
+        .NUM_REQS  (`DNUM_REQS), 
+        .WORD_SIZE (`DWORD_SIZE), 
+        .TAG_WIDTH (`DCORE_TAG_WIDTH-`SM_ENABLE)
+    ) dcache_req_tmp_if();
 
-    VX_dcache_core_rsp_if #(
-        .NUM_REQS       (`DNUM_REQS), 
-        .WORD_SIZE      (`DWORD_SIZE), 
-        .CORE_TAG_WIDTH (`DCORE_TAG_WIDTH-`SM_ENABLE)
-    ) dcache_rsp_if(); 
+    VX_dcache_rsp_if #(
+        .NUM_REQS  (`DNUM_REQS), 
+        .WORD_SIZE (`DWORD_SIZE), 
+        .TAG_WIDTH (`DCORE_TAG_WIDTH-`SM_ENABLE)
+    ) dcache_rsp_tmp_if();
 
-    wire icache_reset, dcache_reset;   
-
-    VX_reset_relay #(
-        .NUM_NODES (2)
-    ) reset_relay (
-        .clk     (clk),
-        .reset   (reset),
-        .reset_o ({dcache_reset, icache_reset})
-    );
+    `RESET_RELAY (icache_reset);
+    `RESET_RELAY (dcache_reset);
 
     VX_cache #(
         .CACHE_ID           (`ICACHE_ID),
@@ -81,6 +74,7 @@ module VX_mem_unit # (
         .WORD_SIZE          (`IWORD_SIZE),
         .NUM_REQS           (1),
         .CREQ_SIZE          (`ICREQ_SIZE),
+        .CRSQ_SIZE          (`ICRSQ_SIZE),
         .MSHR_SIZE          (`IMSHR_SIZE),
         .MRSQ_SIZE          (`IMRSQ_SIZE),
         .MREQ_SIZE          (`IMREQ_SIZE),
@@ -95,19 +89,20 @@ module VX_mem_unit # (
         .reset              (icache_reset),
 
         // Core request
-        .core_req_valid     (icache_core_req_if.valid),
+        .core_req_valid     (icache_req_if.valid),
         .core_req_rw        (1'b0),
         .core_req_byteen    ({`IWORD_SIZE{1'b1}}),
-        .core_req_addr      (icache_core_req_if.addr),
+        .core_req_addr      (icache_req_if.addr),
         .core_req_data      ('x),        
-        .core_req_tag       (icache_core_req_if.tag),
-        .core_req_ready     (icache_core_req_if.ready),
+        .core_req_tag       (icache_req_if.tag),
+        .core_req_ready     (icache_req_if.ready),
 
         // Core response
-        .core_rsp_valid     (icache_core_rsp_if.valid),
-        .core_rsp_data      (icache_core_rsp_if.data),
-        .core_rsp_tag       (icache_core_rsp_if.tag),
-        .core_rsp_ready     (icache_core_rsp_if.ready),
+        .core_rsp_valid     (icache_rsp_if.valid),
+        .core_rsp_data      (icache_rsp_if.data),
+        .core_rsp_tag       (icache_rsp_if.tag),
+        .core_rsp_ready     (icache_rsp_if.ready),
+        `UNUSED_PIN (core_rsp_tmask),
 
     `ifdef PERF_ENABLE
         .perf_cache_if      (perf_icache_if),
@@ -138,6 +133,7 @@ module VX_mem_unit # (
         .WORD_SIZE          (`DWORD_SIZE),
         .NUM_REQS           (`DNUM_REQS),
         .CREQ_SIZE          (`DCREQ_SIZE),
+        .CRSQ_SIZE          (`DCRSQ_SIZE),
         .MSHR_SIZE          (`DMSHR_SIZE),
         .MRSQ_SIZE          (`DMRSQ_SIZE),
         .MREQ_SIZE          (`DMREQ_SIZE),
@@ -153,19 +149,20 @@ module VX_mem_unit # (
         .reset              (dcache_reset),
 
         // Core req
-        .core_req_valid     (dcache_req_if.valid),
-        .core_req_rw        (dcache_req_if.rw),
-        .core_req_byteen    (dcache_req_if.byteen),
-        .core_req_addr      (dcache_req_if.addr),
-        .core_req_data      (dcache_req_if.data),        
-        .core_req_tag       (dcache_req_if.tag),
-        .core_req_ready     (dcache_req_if.ready),
+        .core_req_valid     (dcache_req_tmp_if.valid),
+        .core_req_rw        (dcache_req_tmp_if.rw),
+        .core_req_byteen    (dcache_req_tmp_if.byteen),
+        .core_req_addr      (dcache_req_tmp_if.addr),
+        .core_req_data      (dcache_req_tmp_if.data),        
+        .core_req_tag       (dcache_req_tmp_if.tag),
+        .core_req_ready     (dcache_req_tmp_if.ready),
 
         // Core response
-        .core_rsp_valid     (dcache_rsp_if.valid),
-        .core_rsp_data      (dcache_rsp_if.data),
-        .core_rsp_tag       (dcache_rsp_if.tag),
-        .core_rsp_ready     (dcache_rsp_if.ready),
+        .core_rsp_valid     (dcache_rsp_tmp_if.valid),
+        .core_rsp_tmask     (dcache_rsp_tmp_if.tmask),
+        .core_rsp_data      (dcache_rsp_tmp_if.data),
+        .core_rsp_tag       (dcache_rsp_tmp_if.tag),
+        .core_rsp_ready     (dcache_rsp_tmp_if.ready),
 
     `ifdef PERF_ENABLE
         .perf_cache_if      (perf_dcache_if),
@@ -188,38 +185,32 @@ module VX_mem_unit # (
     ); 
 
     if (`SM_ENABLE) begin                
-        VX_dcache_core_req_if #(
-            .NUM_REQS       (`DNUM_REQS), 
-            .WORD_SIZE      (`DWORD_SIZE), 
-            .CORE_TAG_WIDTH (`DCORE_TAG_WIDTH-`SM_ENABLE)
+        VX_dcache_req_if #(
+            .NUM_REQS  (`DNUM_REQS), 
+            .WORD_SIZE (`DWORD_SIZE), 
+            .TAG_WIDTH (`DCORE_TAG_WIDTH-`SM_ENABLE)
         ) smem_req_if();
 
-        VX_dcache_core_rsp_if #(
-            .NUM_REQS       (`DNUM_REQS), 
-            .WORD_SIZE      (`DWORD_SIZE), 
-            .CORE_TAG_WIDTH (`DCORE_TAG_WIDTH-`SM_ENABLE)
+        VX_dcache_rsp_if #(
+            .NUM_REQS  (`DNUM_REQS), 
+            .WORD_SIZE (`DWORD_SIZE), 
+            .TAG_WIDTH (`DCORE_TAG_WIDTH-`SM_ENABLE)
         ) smem_rsp_if();
 
         VX_smem_arb smem_arb (
             .clk          (clk),
             .reset        (reset),
 
-            .core_req_if  (dcache_core_req_if),
-            .cache_req_if (dcache_req_if),
+            .core_req_if  (dcache_req_if),
+            .cache_req_if (dcache_req_tmp_if),
             .smem_req_if  (smem_req_if),
 
-            .cache_rsp_if (dcache_rsp_if),
+            .cache_rsp_if (dcache_rsp_tmp_if),
             .smem_rsp_if  (smem_rsp_if),
-            .core_rsp_if  (dcache_core_rsp_if)
+            .core_rsp_if  (dcache_rsp_if)
         );
 
-        wire scache_reset;   
-
-        VX_reset_relay reset_relay (
-            .clk     (clk),
-            .reset   (reset),
-            .reset_o (scache_reset)
-        );        
+        `RESET_RELAY (smem_reset);
 
         VX_shared_mem #(
             .CACHE_ID           (`SCACHE_ID),
@@ -228,12 +219,13 @@ module VX_mem_unit # (
             .WORD_SIZE          (`SWORD_SIZE),
             .NUM_REQS           (`SNUM_REQS),
             .CREQ_SIZE          (`SCREQ_SIZE),
+            .CRSQ_SIZE          (`SCRSQ_SIZE),
             .CORE_TAG_WIDTH     (`DCORE_TAG_WIDTH-`SM_ENABLE),
             .CORE_TAG_ID_BITS   (`DCORE_TAG_ID_BITS-`SM_ENABLE),
             .BANK_ADDR_OFFSET   (`SBANK_ADDR_OFFSET)
         ) smem (            
             .clk                (clk),
-            .reset              (scache_reset),
+            .reset              (smem_reset),
 
         `ifdef PERF_ENABLE
             .perf_cache_if      (perf_smem_if),
@@ -250,25 +242,26 @@ module VX_mem_unit # (
 
             // Core response
             .core_rsp_valid     (smem_rsp_if.valid),
+            .core_rsp_tmask     (smem_rsp_if.tmask),
             .core_rsp_data      (smem_rsp_if.data),
             .core_rsp_tag       (smem_rsp_if.tag),
             .core_rsp_ready     (smem_rsp_if.ready)
         );    
     end else begin
         // core to D-cache request
-        assign dcache_req_if.valid  = dcache_core_req_if.valid;
-        assign dcache_req_if.addr   = dcache_core_req_if.addr;
-        assign dcache_req_if.rw     = dcache_core_req_if.rw;        
-        assign dcache_req_if.byteen = dcache_core_req_if.byteen;
-        assign dcache_req_if.data   = dcache_core_req_if.data;
-        assign dcache_req_if.tag    = dcache_core_req_if.tag;
-        assign dcache_core_req_if.ready = dcache_req_if.ready;
+        assign dcache_req_tmp_if.valid  = dcache_req_if.valid;
+        assign dcache_req_tmp_if.addr   = dcache_req_if.addr;
+        assign dcache_req_tmp_if.rw     = dcache_req_if.rw;        
+        assign dcache_req_tmp_if.byteen = dcache_req_if.byteen;
+        assign dcache_req_tmp_if.data   = dcache_req_if.data;
+        assign dcache_req_tmp_if.tag    = dcache_req_if.tag;
+        assign dcache_req_tmp_if.ready  = dcache_req_if.ready;
         
         // D-cache to core reponse
-        assign dcache_core_rsp_if.valid = dcache_rsp_if.valid;
-        assign dcache_core_rsp_if.tag   = dcache_rsp_if.tag;
-        assign dcache_core_rsp_if.data  = dcache_rsp_if.data;
-        assign dcache_rsp_if.ready = dcache_core_rsp_if.ready;
+        assign dcache_rsp_if.valid  = dcache_rsp_tmp_if.valid;
+        assign dcache_rsp_if.tag    = dcache_rsp_tmp_if.tag;
+        assign dcache_rsp_if.data   = dcache_rsp_tmp_if.data;
+        assign dcache_rsp_if.ready  = dcache_rsp_tmp_if.ready;
     end
 
     wire [`DMEM_TAG_WIDTH-1:0] icache_mem_req_tag = `DMEM_TAG_WIDTH'(icache_mem_req_if.tag);
@@ -278,11 +271,11 @@ module VX_mem_unit # (
 
     VX_mem_arb #(
         .NUM_REQS      (2),
-        .DATA_WIDTH    (`DMEM_LINE_WIDTH),
+        .DATA_WIDTH    (`DMEM_DATA_WIDTH),
         .ADDR_WIDTH    (`DMEM_ADDR_WIDTH),
         .TAG_IN_WIDTH  (`DMEM_TAG_WIDTH),
         .BUFFERED_REQ  (1),
-        .BUFFERED_RSP  (1)
+        .BUFFERED_RSP  (2)
     ) mem_arb (
         .clk            (clk),
         .reset          (reset),

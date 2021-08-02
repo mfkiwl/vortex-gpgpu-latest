@@ -9,8 +9,8 @@
 
 `define REQS_BITS               `LOG2UP(NUM_REQS)
 
-//                               tag               valid  byteen      tid          word_sel              
-`define MSHR_DATA_WIDTH         (CORE_TAG_WIDTH + (1 +    WORD_SIZE + `REQS_BITS + `UP(`WORD_SELECT_BITS)) * NUM_PORTS)
+//                               tag               valid  tid          word_sel              
+`define MSHR_DATA_WIDTH         (CORE_TAG_WIDTH + (1 +    `REQS_BITS + `UP(`WORD_SELECT_BITS)) * NUM_PORTS)
 
 `define WORD_WIDTH              (8 * WORD_SIZE)
 
@@ -53,7 +53,7 @@
 
 ///////////////////////////////////////////////////////////////////////////////
 
-`define CORE_REQ_TAG_COUNT      ((CORE_TAG_ID_BITS != 0) ? 1 : NUM_REQS)
+`define CORE_RSP_TAGS           ((CORE_TAG_ID_BITS != 0) ? 1 : NUM_REQS)
 
 `define BANK_READY_COUNT        ((SHARED_BANK_READY != 0) ? 1 : NUM_BANKS)
 

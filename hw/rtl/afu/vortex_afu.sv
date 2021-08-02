@@ -37,19 +37,17 @@ module vortex_afu #(
   input                         avs_readdatavalid [NUM_LOCAL_MEM_BANKS]
 );
 
-localparam RESET_DELAY        = 3;  
-
-localparam LMEM_LINE_WIDTH    = $bits(t_local_mem_data);
+localparam LMEM_DATA_WIDTH    = $bits(t_local_mem_data);
 localparam LMEM_ADDR_WIDTH    = $bits(t_local_mem_addr);
 localparam LMEM_BURST_CTRW    = $bits(t_local_mem_burst_cnt);
 
-localparam CCI_LINE_WIDTH     = $bits(t_ccip_clData);
-localparam CCI_LINE_SIZE      = CCI_LINE_WIDTH / 8;
-localparam CCI_ADDR_WIDTH     = 32 - $clog2(CCI_LINE_SIZE);
+localparam CCI_DATA_WIDTH     = $bits(t_ccip_clData);
+localparam CCI_DATA_SIZE      = CCI_DATA_WIDTH / 8;
+localparam CCI_ADDR_WIDTH     = 32 - $clog2(CCI_DATA_SIZE);
 
-localparam AVS_RD_QUEUE_SIZE  = 16;
-localparam AVS_REQ_TAGW_VX    = `MAX(`VX_MEM_TAG_WIDTH, `VX_MEM_TAG_WIDTH + $clog2(LMEM_LINE_WIDTH) - $clog2(`VX_MEM_LINE_WIDTH));
-localparam AVS_REQ_TAGW_CCI   = `MAX(CCI_ADDR_WIDTH, CCI_ADDR_WIDTH + $clog2(LMEM_LINE_WIDTH) - $clog2(CCI_LINE_WIDTH));
+localparam AVS_RD_QUEUE_SIZE  = 4;
+localparam AVS_REQ_TAGW_VX    = `MAX(`VX_MEM_TAG_WIDTH, `VX_MEM_TAG_WIDTH + $clog2(LMEM_DATA_WIDTH) - $clog2(`VX_MEM_DATA_WIDTH));
+localparam AVS_REQ_TAGW_CCI   = `MAX(CCI_ADDR_WIDTH, CCI_ADDR_WIDTH + $clog2(LMEM_DATA_WIDTH) - $clog2(CCI_DATA_WIDTH));
 localparam AVS_REQ_TAGW       = `MAX(AVS_REQ_TAGW_VX, AVS_REQ_TAGW_CCI);
 
 localparam CCI_RD_WINDOW_SIZE = 8;
@@ -70,7 +68,7 @@ localparam MMIO_STATUS        = `AFU_IMAGE_MMIO_STATUS;
 
 localparam COUT_TID_WIDTH    = $clog2(`IO_COUT_SIZE); 
 localparam COUT_QUEUE_DATAW  = COUT_TID_WIDTH + 8;
-localparam COUT_QUEUE_SIZE   = 256; 
+localparam COUT_QUEUE_SIZE   = 64; 
 
 localparam MMIO_SCOPE_READ    = `AFU_IMAGE_MMIO_SCOPE_READ;
 localparam MMIO_SCOPE_WRITE   = `AFU_IMAGE_MMIO_SCOPE_WRITE;
@@ -79,7 +77,7 @@ localparam MMIO_DEV_CAPS      = `AFU_IMAGE_MMIO_DEV_CAPS;
 
 localparam CCI_RD_QUEUE_SIZE  = 2 * CCI_RD_WINDOW_SIZE;
 localparam CCI_RD_QUEUE_TAGW  = $clog2(CCI_RD_WINDOW_SIZE);
-localparam CCI_RD_QUEUE_DATAW = CCI_LINE_WIDTH + CCI_ADDR_WIDTH;
+localparam CCI_RD_QUEUE_DATAW = CCI_DATA_WIDTH + CCI_ADDR_WIDTH;
 
 localparam STATE_IDLE         = 0;
 localparam STATE_WRITE        = 1;
@@ -104,12 +102,12 @@ wire vx_mem_req_valid;
 wire vx_mem_req_rw;
 wire [`VX_MEM_BYTEEN_WIDTH-1:0] vx_mem_req_byteen;
 wire [`VX_MEM_ADDR_WIDTH-1:0]   vx_mem_req_addr;
-wire [`VX_MEM_LINE_WIDTH-1:0]   vx_mem_req_data;
+wire [`VX_MEM_DATA_WIDTH-1:0]   vx_mem_req_data;
 wire [`VX_MEM_TAG_WIDTH-1:0]    vx_mem_req_tag;
 wire vx_mem_req_ready;
 
 wire vx_mem_rsp_valid;
-wire [`VX_MEM_LINE_WIDTH-1:0]   vx_mem_rsp_data;
+wire [`VX_MEM_DATA_WIDTH-1:0]   vx_mem_rsp_data;
 wire [`VX_MEM_TAG_WIDTH-1:0]    vx_mem_rsp_tag;
 wire vx_mem_rsp_ready;
 
@@ -170,7 +168,7 @@ wire [2:0] cmd_type = (cp2af_sRxPort.c0.mmioWrValid
 
 // disable assertions until full reset
 `ifndef VERILATOR
-reg [$clog2(RESET_DELAY+1)-1:0] assert_delay_ctr;
+reg [$clog2(`RESET_DELAY+1)-1:0] assert_delay_ctr;
 initial begin
   $assertoff;  
 end
@@ -179,7 +177,7 @@ always @(posedge clk) begin
     assert_delay_ctr <= 0;
   end else begin
     assert_delay_ctr <= assert_delay_ctr + 1;
-    if (assert_delay_ctr == RESET_DELAY) begin
+    if (assert_delay_ctr == (`RESET_DELAY-1)) begin
       $asserton; // enable assertions
     end
   end
@@ -293,7 +291,7 @@ reg  cmd_write_done;
 wire cmd_run_done;
 reg  vx_started;
 
-reg [$clog2(RESET_DELAY+1)-1:0] vx_reset_ctr;
+reg [$clog2(`RESET_DELAY+1)-1:0] vx_reset_ctr;
 always @(posedge clk) begin
   if (state == STATE_IDLE) begin
     vx_reset_ctr <= 0;
@@ -365,7 +363,7 @@ always @(posedge clk) begin
           `endif
           end
         end else begin
-          if (vx_reset_ctr == $bits(vx_reset_ctr)'(RESET_DELAY)) begin
+          if (vx_reset_ctr == (`RESET_DELAY-1)) begin
             vx_started <= 1;
             vx_reset   <= 0;
           end  
@@ -389,12 +387,12 @@ wire [CCI_RD_QUEUE_DATAW-1:0] cci_rdq_dout;
 wire cci_mem_req_valid;
 wire cci_mem_req_rw;
 wire [CCI_ADDR_WIDTH-1:0] cci_mem_req_addr;
-wire [CCI_LINE_WIDTH-1:0] cci_mem_req_data;
+wire [CCI_DATA_WIDTH-1:0] cci_mem_req_data;
 wire [CCI_ADDR_WIDTH-1:0] cci_mem_req_tag;
 wire cci_mem_req_ready;
 
 wire cci_mem_rsp_valid;        
-wire [CCI_LINE_WIDTH-1:0] cci_mem_rsp_data;
+wire [CCI_DATA_WIDTH-1:0] cci_mem_rsp_data;
 wire [CCI_ADDR_WIDTH-1:0] cci_mem_rsp_tag;
 wire cci_mem_rsp_ready;
 
@@ -414,8 +412,8 @@ wire [AVS_REQ_TAGW-1:0] cci_mem_rsp_arb_tag;
 wire                    cci_mem_rsp_arb_ready;
 
 VX_to_mem #(
-  .SRC_DATA_WIDTH (CCI_LINE_WIDTH), 
-  .DST_DATA_WIDTH (LMEM_LINE_WIDTH), 
+  .SRC_DATA_WIDTH (CCI_DATA_WIDTH), 
+  .DST_DATA_WIDTH (LMEM_DATA_WIDTH), 
   .SRC_ADDR_WIDTH (CCI_ADDR_WIDTH),  
   .DST_ADDR_WIDTH (LMEM_ADDR_WIDTH),         
   .SRC_TAG_WIDTH  (CCI_ADDR_WIDTH),
@@ -427,7 +425,7 @@ VX_to_mem #(
   .mem_req_valid_in   (cci_mem_req_valid),
   .mem_req_addr_in    (cci_mem_req_addr),
   .mem_req_rw_in      (cci_mem_req_rw),
-  .mem_req_byteen_in  ({CCI_LINE_SIZE{1'b1}}),
+  .mem_req_byteen_in  ({CCI_DATA_SIZE{1'b1}}),
   .mem_req_data_in    (cci_mem_req_data),
   .mem_req_tag_in     (cci_mem_req_tag), 
   .mem_req_ready_in   (cci_mem_req_ready), 
@@ -470,15 +468,13 @@ wire vx_mem_is_cout;
 wire vx_mem_req_valid_qual;
 wire vx_mem_req_ready_qual;
 
-assign vx_mem_req_valid_qual = vx_mem_req_valid 
-                            && vx_started 
-                            && ~vx_mem_is_cout;
+assign vx_mem_req_valid_qual = vx_mem_req_valid && vx_started;
 
 assign vx_mem_req_ready = vx_mem_is_cout ? ~cout_q_full : vx_mem_req_ready_qual;
 
 VX_to_mem #(
-  .SRC_DATA_WIDTH (`VX_MEM_LINE_WIDTH),
-  .DST_DATA_WIDTH (LMEM_LINE_WIDTH),  
+  .SRC_DATA_WIDTH (`VX_MEM_DATA_WIDTH),
+  .DST_DATA_WIDTH (LMEM_DATA_WIDTH),  
   .SRC_ADDR_WIDTH (`VX_MEM_ADDR_WIDTH),    
   .DST_ADDR_WIDTH (LMEM_ADDR_WIDTH),
   .SRC_TAG_WIDTH  (`VX_MEM_TAG_WIDTH),
@@ -531,11 +527,12 @@ wire                    mem_rsp_ready;
 
 VX_mem_arb #(
   .NUM_REQS       (2),
-  .DATA_WIDTH     (LMEM_LINE_WIDTH),
+  .DATA_WIDTH     (LMEM_DATA_WIDTH),
   .ADDR_WIDTH     (LMEM_ADDR_WIDTH),
   .TAG_IN_WIDTH   (AVS_REQ_TAGW),
-  .BUFFERED_REQ   (1),
-  .BUFFERED_RSP   (1)
+  .BUFFERED_REQ   (0),
+  .BUFFERED_RSP   (0),
+  .TYPE           ("X")
 ) mem_arb (
   .clk            (clk),
   .reset          (reset),
@@ -575,7 +572,7 @@ VX_mem_arb #(
 
 VX_avs_wrapper #(
   .NUM_BANKS       (NUM_LOCAL_MEM_BANKS),
-  .AVS_DATA_WIDTH  (LMEM_LINE_WIDTH), 
+  .AVS_DATA_WIDTH  (LMEM_DATA_WIDTH), 
   .AVS_ADDR_WIDTH  (LMEM_ADDR_WIDTH),
   .AVS_BURST_WIDTH (LMEM_BURST_CTRW),
   .AVS_BANKS       (NUM_LOCAL_MEM_BANKS),
@@ -742,8 +739,9 @@ always @(posedge clk) begin
 end
 
 VX_fifo_queue #(
-  .DATAW   (CCI_RD_QUEUE_DATAW),
-  .SIZE    (CCI_RD_QUEUE_SIZE)
+  .DATAW      (CCI_RD_QUEUE_DATAW),
+  .SIZE       (CCI_RD_QUEUE_SIZE),
+  .OUTPUT_REG (1)
 ) cci_rd_req_queue (
   .clk      (clk),
   .reset    (reset),
@@ -925,11 +923,17 @@ VX_onehot_encoder #(
 ) cout_tid_enc (
   .data_in  (vx_mem_req_byteen),
   .data_out (cout_tid),
-  `UNUSED_PIN (valid)
+  `UNUSED_PIN (valid_out)
 );
 
-wire [`VX_MEM_BYTEEN_WIDTH-1:0][7:0] vx_mem_req_data_ar = vx_mem_req_data;
-assign cout_char = vx_mem_req_data_ar[cout_tid];
+VX_onehot_mux #(
+  .DATAW (8),
+  .N     (`VX_MEM_BYTEEN_WIDTH)
+) cout_char_mux (
+  .data_in  (vx_mem_req_data),
+  .sel_in   (vx_mem_req_byteen),
+  .data_out (cout_char)
+);
 
 assign vx_mem_is_cout = (vx_mem_req_addr == `VX_MEM_ADDR_WIDTH'(`IO_COUT_ADDR >> (32 - `VX_MEM_ADDR_WIDTH)));
 
@@ -943,8 +947,8 @@ wire cout_q_pop = cp2af_sRxPort.c0.mmioRdValid
                && ~cout_q_empty;
 
 VX_fifo_queue #(
-  .DATAW   (COUT_QUEUE_DATAW),
-  .SIZE    (COUT_QUEUE_SIZE)
+  .DATAW (COUT_QUEUE_DATAW),
+  .SIZE  (COUT_QUEUE_SIZE)
 ) cout_queue (
   .clk      (clk),
   .reset    (reset),

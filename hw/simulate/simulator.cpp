@@ -5,6 +5,14 @@
 
 #define ENABLE_MEM_STALLS
 
+#ifndef TRACE_START_TIME
+#define TRACE_START_TIME 0ull
+#endif
+
+#ifndef TRACE_STOP_TIME
+#define TRACE_STOP_TIME -1ull
+#endif
+
 #ifndef MEM_LATENCY
 #define MEM_LATENCY 24
 #endif
@@ -24,11 +32,30 @@
 #define VL_WDATA_GETW(lwp, i, n, w) \
   VL_SEL_IWII(0, n * w, 0, 0, lwp, i * w, w)
 
-uint64_t timestamp = 0;
+static uint64_t timestamp = 0;
 
 double sc_time_stamp() { 
   return timestamp;
 }
+
+///////////////////////////////////////////////////////////////////////////////
+
+static bool trace_enabled = false;
+static uint64_t trace_start_time = TRACE_START_TIME;
+static uint64_t trace_stop_time = TRACE_STOP_TIME;
+
+bool sim_trace_enabled() {
+  if (timestamp >= trace_start_time 
+   && timestamp < trace_stop_time)
+    return true;
+  return trace_enabled;
+}
+
+void sim_trace_enable(bool enable) {
+  trace_enabled = enable;
+}
+
+///////////////////////////////////////////////////////////////////////////////
 
 Simulator::Simulator() {  
   // force random values for unitialized signals  
@@ -61,6 +88,7 @@ Simulator::~Simulator() {
   }
 #ifdef VCD_OUTPUT
   trace_->close();
+  delete trace_;
 #endif
   delete vortex_;
 }
@@ -120,7 +148,9 @@ void Simulator::step() {
 void Simulator::eval() {
   vortex_->eval();
 #ifdef VCD_OUTPUT
-  trace_->dump(timestamp);
+  if (sim_trace_enabled()) {
+    trace_->dump(timestamp);
+  }
 #endif
   ++timestamp;
 }
@@ -141,11 +171,11 @@ void Simulator::eval_mem_bus() {
 
   bool has_response = false;
 
-  // schedule memory responses in FIFO order
+  // schedule memory responses that are ready
   for (int i = 0; i < MEMORY_BANKS; ++i) {
     uint32_t b = (i + last_mem_rsp_bank_ + 1) % MEMORY_BANKS;
     if (!mem_rsp_vec_[b].empty()
-    && (0 == mem_rsp_vec_[b].begin()->cycles_left)) {
+    && (mem_rsp_vec_[b].begin()->cycles_left) <= 0) {
         has_response = true;
         last_mem_rsp_bank_ = b;
         break;
@@ -160,7 +190,14 @@ void Simulator::eval_mem_bus() {
   if (!mem_rsp_active_) {
     if (has_response) {
       vortex_->mem_rsp_valid = 1;      
-      std::list<mem_req_t>::iterator mem_rsp_it = mem_rsp_vec_[last_mem_rsp_bank_].begin();
+      std::list<mem_req_t>::iterator mem_rsp_it = mem_rsp_vec_[last_mem_rsp_bank_].begin();      
+      /*
+        printf("%0ld: [sim] MEM Rd: bank=%d, addr=%0lx, data=", timestamp, last_mem_rsp_bank_, mem_rsp_it->addr);
+        for (int i = 0; i < MEM_BLOCK_SIZE; i++) {
+          printf("%02x", mem_rsp_it->block[(MEM_BLOCK_SIZE-1)-i]);
+        }
+        printf("\n");
+      */
       memcpy((uint8_t*)vortex_->mem_rsp_data, mem_rsp_it->block.data(), MEM_BLOCK_SIZE);
       vortex_->mem_rsp_tag = mem_rsp_it->tag;   
       mem_rsp_vec_[last_mem_rsp_bank_].erase(mem_rsp_it);
@@ -205,20 +242,28 @@ void Simulator::eval_mem_bus() {
             }
           }   
         } else {
+          /*
+            printf("%0ld: [sim] MEM Wr: addr=%0x, byteen=%0lx, data=", timestamp, base_addr, byteen);
+            for (int i = 0; i < MEM_BLOCK_SIZE; i++) {
+              printf("%02x", data[(MEM_BLOCK_SIZE-1)-i]);
+            }
+            printf("\n");
+          */
           for (int i = 0; i < MEM_BLOCK_SIZE; i++) {
             if ((byteen >> i) & 0x1) {            
               (*ram_)[base_addr + i] = data[i];
             }
           }
         }
-      } else {        
+      } else {
         mem_req_t mem_req;        
         mem_req.tag  = vortex_->mem_req_tag;   
-        mem_req.addr = vortex_->mem_req_addr;
+        mem_req.addr = (vortex_->mem_req_addr * MEM_BLOCK_SIZE);
         ram_->read(vortex_->mem_req_addr * MEM_BLOCK_SIZE, MEM_BLOCK_SIZE, mem_req.block.data());
         mem_req.cycles_left = MEM_LATENCY;
         for (auto& rsp : mem_rsp_vec_[req_bank]) {
           if (mem_req.addr == rsp.addr) {
+            // duplicate requests receive the same cycle delay
             mem_req.cycles_left = rsp.cycles_left;
             break;
           }

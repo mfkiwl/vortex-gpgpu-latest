@@ -21,7 +21,6 @@ inline size_t align_size(size_t size, size_t alignment) {
 ///////////////////////////////////////////////////////////////////////////////
 
 class vx_device;
-
 class vx_buffer {
 public:
     vx_buffer(size_t size, vx_device* device) 
@@ -84,11 +83,11 @@ public:
         if (dest_addr + asize > ram_.size())
             return -1;
 
-        /*printf("VXDRV: upload %d bytes from 0x%lx to 0x%lx", size, (uint8_t*)src + src_offset, dest_addr);
-        if (size <= 1024) {
-            printf(": ");
-            for (int i = asize-1; i >= 0; --i) {
-                printf("%x", *((uint8_t*)src + src_offset + i));
+        /*printf("VXDRV: upload %ld bytes from 0x%lx:", size, uintptr_t((uint8_t*)src + src_offset));
+        for (int i = 0;  i < (asize / CACHE_BLOCK_SIZE); ++i) {
+            printf("\n0x%08lx=", dest_addr + i * CACHE_BLOCK_SIZE);
+            for (int j = 0;  j < CACHE_BLOCK_SIZE; ++j) {
+                printf("%02x", *((uint8_t*)src + src_offset + i * CACHE_BLOCK_SIZE + CACHE_BLOCK_SIZE - 1 - j));
             }
         }
         printf("\n");*/
@@ -104,11 +103,11 @@ public:
 
         ram_.read(src_addr, asize, (uint8_t*)dest + dest_offset);
         
-        /*printf("VXDRV: download %d bytes from 0x%lx to 0x%lx", size, src_addr, (uint8_t*)dest + dest_offset);
-        if (size <= 1024) {
-            printf(": ");
-            for (int i = asize-1; i >= 0; --i) {
-                printf("%x", *((uint8_t*)dest + dest_offset + i));
+        /*printf("VXDRV: download %ld bytes to 0x%lx:", size, uintptr_t((uint8_t*)dest + dest_offset));
+        for (int i = 0;  i < (asize / CACHE_BLOCK_SIZE); ++i) {
+            printf("\n0x%08lx=", src_addr + i * CACHE_BLOCK_SIZE);
+            for (int j = 0;  j < CACHE_BLOCK_SIZE; ++j) {
+                printf("%02x", *((uint8_t*)dest + dest_offset + i * CACHE_BLOCK_SIZE + CACHE_BLOCK_SIZE - 1 - j));
             }
         }
         printf("\n");*/
@@ -151,6 +150,34 @@ private:
     Simulator simulator_;
     std::future<void> future_;
 };
+
+///////////////////////////////////////////////////////////////////////////////
+
+#ifdef DUMP_PERF_STATS
+class AutoPerfDump {
+private:
+    std::list<vx_device_h> devices_;
+
+public:
+    AutoPerfDump() {} 
+
+    ~AutoPerfDump() {
+        for (auto device : devices_) {
+            vx_dump_perf(device, stdout);
+        }
+    }
+
+    void add_device(vx_device_h device) {
+        devices_.push_back(device);
+    }
+
+    void remove_device(vx_device_h device) {
+        devices_.remove(device);
+    }    
+};
+
+AutoPerfDump gAutoPerfDump;
+#endif
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -198,6 +225,10 @@ extern int vx_dev_open(vx_device_h* hdevice) {
 
     *hdevice = new vx_device();
 
+#ifdef DUMP_PERF_STATS
+    gAutoPerfDump.add_device(*hdevice);
+#endif
+
     return 0;
 }
 
@@ -208,7 +239,8 @@ extern int vx_dev_close(vx_device_h hdevice) {
     vx_device *device = ((vx_device*)hdevice);
     
 #ifdef DUMP_PERF_STATS
-    vx_dump_perf(device, stdout);
+    gAutoPerfDump.remove_device(hdevice);
+    vx_dump_perf(hdevice, stdout);
 #endif
 
     delete device;

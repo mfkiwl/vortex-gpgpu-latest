@@ -16,6 +16,7 @@ typedef struct {
 	int offset;
 	int N;
 	int R;
+  int NW;
 } wspawn_tasks_args_t;
 
 typedef struct {
@@ -25,6 +26,7 @@ typedef struct {
   int  offset; 
   int  N;
   int  R;  
+  int  NW;
   char isXYpow2;
   char isXpow2;
   char log2XY;
@@ -43,7 +45,8 @@ inline int fast_log2(int x) {
 }
 
 static void spawn_tasks_callback() {  
-  vx_tmc(vx_num_threads());
+  // activate all threads
+  vx_tmc(-1);
 
   int core_id = vx_core_id();
   int wid     = vx_warp_id();
@@ -60,11 +63,16 @@ static void spawn_tasks_callback() {
     (p_wspawn_args->callback)(task_id, p_wspawn_args->arg);
   }
 
+  // wait for all warps to complete
+  vx_barrier(0, p_wspawn_args->NW);
+
+  // set warp0 to single-threaded and stop other warps
   vx_tmc(0 == wid);
 }
 
-void spawn_remaining_tasks_callback(int nthreads) {    
-  vx_tmc(nthreads);
+void spawn_remaining_tasks_callback(int thread_mask) {  
+  // activate threads  
+  vx_tmc(thread_mask);
 
   int core_id = vx_core_id(); 
   int tid = vx_thread_gid();
@@ -74,6 +82,7 @@ void spawn_remaining_tasks_callback(int nthreads) {
   int task_id = p_wspawn_args->offset + tid;
   (p_wspawn_args->callback)(task_id, p_wspawn_args->arg);
 
+  // back to single-threaded
   vx_tmc(1);
 }
 
@@ -112,12 +121,13 @@ void vx_spawn_tasks(int num_tasks, vx_spawn_tasks_cb callback , void * arg) {
     fW = 1;
 
   //--
-  wspawn_tasks_args_t wspawn_args = { callback, arg, core_id * tasks_per_core, fW, rW };
+  wspawn_tasks_args_t wspawn_args = { callback, arg, core_id * tasks_per_core, fW, rW, 0 };
   g_wspawn_args[core_id] = &wspawn_args;
 
   //--
 	if (nW >= 1)	{ 
     int nw = MIN(nW, NW);    
+    wspawn_args.NW = nw;
 	  vx_wspawn(nw, spawn_tasks_callback);
     spawn_tasks_callback();
 	}  
@@ -125,14 +135,16 @@ void vx_spawn_tasks(int num_tasks, vx_spawn_tasks_cb callback , void * arg) {
   //--    
   if (rT != 0) {
     wspawn_args.offset = tasks_per_core0 - rT;
-    spawn_remaining_tasks_callback(rT);
+    int tmask = (1 << rT) - 1;
+    spawn_remaining_tasks_callback(tmask);
   }
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 
 static void spawn_kernel_callback() {  
-  vx_tmc(vx_num_threads());
+  // activate all threads
+  vx_tmc(-1);
 
   int core_id = vx_core_id();
   int wid     = vx_warp_id();
@@ -162,11 +174,16 @@ static void spawn_kernel_callback() {
     (p_wspawn_args->callback)(p_wspawn_args->arg, p_wspawn_args->ctx, gid0, gid1, gid2);
   }
 
+  // wait for all warps to complete
+  vx_barrier(0, p_wspawn_args->NW);
+
+  // set warp0 to single-threaded and stop other warps
   vx_tmc(0 == wid);
 }
 
-static void spawn_kernel_remaining_callback(int nthreads) {    
-  vx_tmc(nthreads);
+static void spawn_kernel_remaining_callback(int thread_mask) {    
+  // activate threads
+  vx_tmc(thread_mask);
 
   int core_id = vx_core_id(); 
   int tid = vx_thread_gid();
@@ -190,6 +207,7 @@ static void spawn_kernel_remaining_callback(int nthreads) {
 
   (p_wspawn_args->callback)(p_wspawn_args->arg, p_wspawn_args->ctx, gid0, gid1, gid2);
 
+  // back to single-threaded
   vx_tmc(1);
 }
 
@@ -242,13 +260,14 @@ void vx_spawn_kernel(struct context_t * ctx, vx_spawn_kernel_cb callback, void *
 
   //--
   wspawn_kernel_args_t wspawn_args = { 
-    ctx, callback, arg, core_id * wgs_per_core, fW, rW, isXYpow2, isXpow2, log2XY, log2X 
+    ctx, callback, arg, core_id * wgs_per_core, fW, rW, 0, isXYpow2, isXpow2, log2XY, log2X 
   };
   g_wspawn_args[core_id] = &wspawn_args;
 
   //--
 	if (nW >= 1)	{ 
     int nw = MIN(nW, NW);    
+    wspawn_args.NW = nw;
 	  vx_wspawn(nw, spawn_kernel_callback);
     spawn_kernel_callback();
 	}  
@@ -256,7 +275,8 @@ void vx_spawn_kernel(struct context_t * ctx, vx_spawn_kernel_cb callback, void *
   //--    
   if (rT != 0) {
     wspawn_args.offset = wgs_per_core0 - rT;
-    spawn_kernel_remaining_callback(rT);
+    int tmask = (1 << rT) - 1;
+    spawn_kernel_remaining_callback(tmask);
   }
 }
 

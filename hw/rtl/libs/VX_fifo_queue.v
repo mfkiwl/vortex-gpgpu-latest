@@ -1,14 +1,15 @@
 `include "VX_platform.vh"
 
+`TRACING_OFF
 module VX_fifo_queue #(
-    parameter DATAW     = 1,
-    parameter SIZE      = 2,
-    parameter ALM_FULL  = (SIZE - 1),
-    parameter ALM_EMPTY = 1,
-    parameter ADDRW     = $clog2(SIZE),
-    parameter SIZEW     = $clog2(SIZE+1),
-    parameter BUFFERED  = 0,
-    parameter FASTRAM   = 1
+    parameter DATAW      = 1,
+    parameter SIZE       = 2,
+    parameter ALM_FULL   = (SIZE - 1),
+    parameter ALM_EMPTY  = 1,
+    parameter ADDRW      = $clog2(SIZE),
+    parameter SIZEW      = $clog2(SIZE+1),
+    parameter OUTPUT_REG = 0,
+    parameter LUTRAM     = 1
 ) ( 
     input  wire             clk,
     input  wire             reset,    
@@ -95,16 +96,14 @@ module VX_fifo_queue #(
                     used_r <= used_r + ADDRW'($signed(2'(push) - 2'(pop)));
                 end else begin 
                     // (SIZE == 2);
-                `IGNORE_WARNINGS_BEGIN
-                    used_r <= used_r ^ (push ^ pop);
-                `IGNORE_WARNINGS_END
+                    used_r[0] <= used_r[0] ^ (push ^ pop);
                 end                
             end                   
         end
 
         if (SIZE == 2) begin
 
-            if (0 == BUFFERED) begin 
+            if (0 == OUTPUT_REG) begin 
 
                 reg [DATAW-1:0] shift_reg [1:0];
 
@@ -139,7 +138,7 @@ module VX_fifo_queue #(
         
         end else begin
 
-            if (0 == BUFFERED) begin          
+            if (0 == OUTPUT_REG) begin          
 
                 reg [ADDRW-1:0] rd_ptr_r;
                 reg [ADDRW-1:0] wr_ptr_r;
@@ -155,20 +154,18 @@ module VX_fifo_queue #(
                 end
 
                 VX_dp_ram #(
-                    .DATAW    (DATAW),
-                    .SIZE     (SIZE),
-                    .BUFFERED (0),
-                    .RWCHECK  (1),
-                    .FASTRAM  (FASTRAM)
+                    .DATAW      (DATAW),
+                    .SIZE       (SIZE),
+                    .OUTPUT_REG (0),
+                    .LUTRAM     (LUTRAM)
                 ) dp_ram (
                     .clk(clk),
-                    .waddr(wr_ptr_r),                            
-                    .raddr(rd_ptr_r),
-                    .wren(push),
-                    .byteen(1'b1),
-                    .rden(1'b1),
-                    .din(data_in),
-                    .dout(data_out)
+                    .wren  (push),
+                    .waddr (wr_ptr_r),
+                    .wdata (data_in),
+                    .rden  (1'b1),
+                    .raddr (rd_ptr_r),
+                    .rdata (data_out)
                 );
 
             end else begin
@@ -200,20 +197,18 @@ module VX_fifo_queue #(
                 end
 
                 VX_dp_ram #(
-                    .DATAW    (DATAW),
-                    .SIZE     (SIZE),
-                    .BUFFERED (0),
-                    .RWCHECK  (1),
-                    .FASTRAM  (FASTRAM)
+                    .DATAW      (DATAW),
+                    .SIZE       (SIZE),
+                    .OUTPUT_REG (0),
+                    .LUTRAM     (LUTRAM)
                 ) dp_ram (
-                    .clk(clk),
-                    .waddr(wr_ptr_r),                            
-                    .raddr(rd_ptr_n_r),
-                    .wren(push),
-                    .byteen(1'b1),
-                    .rden(1'b1),
-                    .din(data_in),
-                    .dout(dout)
+                    .clk   (clk),
+                    .wren  (push),
+                    .waddr (wr_ptr_r),
+                    .wdata (data_in),
+                    .rden  (1'b1),
+                    .raddr (rd_ptr_n_r),
+                    .rdata (dout)
                 ); 
 
                 always @(posedge clk) begin
@@ -236,3 +231,4 @@ module VX_fifo_queue #(
     end
 
 endmodule
+`TRACING_ON

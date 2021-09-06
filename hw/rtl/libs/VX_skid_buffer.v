@@ -1,10 +1,11 @@
 `include "VX_platform.vh"
 
+`TRACING_OFF
 module VX_skid_buffer #(
     parameter DATAW          = 1,
     parameter PASSTHRU       = 0,
     parameter NOBACKPRESSURE = 0,
-    parameter USE_FASTREG    = 0
+    parameter OUTPUT_REG     = 0
 ) ( 
     input  wire             clk,
     input  wire             reset,
@@ -50,7 +51,7 @@ module VX_skid_buffer #(
     
     end else begin
 
-        if (USE_FASTREG) begin
+        if (OUTPUT_REG) begin
 
             reg [DATAW-1:0] data_out_r;
             reg [DATAW-1:0] buffer;
@@ -115,9 +116,7 @@ module VX_skid_buffer #(
                         ready_in_r  <= 1;
                         valid_out_r <= rd_ptr_r;
                     end
-                `IGNORE_WARNINGS_BEGIN
                     rd_ptr_r <= rd_ptr_r ^ (push ^ pop);
-                `IGNORE_WARNINGS_END   
                 end                   
             end
 
@@ -135,3 +134,4 @@ module VX_skid_buffer #(
     end
 
 endmodule
+`TRACING_ON

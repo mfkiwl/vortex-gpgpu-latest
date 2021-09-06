@@ -12,13 +12,13 @@ module Vortex (
     output wire                             mem_req_rw,    
     output wire [`VX_MEM_BYTEEN_WIDTH-1:0]  mem_req_byteen,    
     output wire [`VX_MEM_ADDR_WIDTH-1:0]    mem_req_addr,
-    output wire [`VX_MEM_LINE_WIDTH-1:0]    mem_req_data,
+    output wire [`VX_MEM_DATA_WIDTH-1:0]    mem_req_data,
     output wire [`VX_MEM_TAG_WIDTH-1:0]     mem_req_tag,
     input  wire                             mem_req_ready,
 
     // Memory response    
     input wire                              mem_rsp_valid,        
-    input wire [`VX_MEM_LINE_WIDTH-1:0]     mem_rsp_data,
+    input wire [`VX_MEM_DATA_WIDTH-1:0]     mem_rsp_data,
     input wire [`VX_MEM_TAG_WIDTH-1:0]      mem_rsp_tag,
     output wire                             mem_rsp_ready,
 
@@ -31,12 +31,12 @@ module Vortex (
     wire [`NUM_CLUSTERS-1:0]                         per_cluster_mem_req_rw;
     wire [`NUM_CLUSTERS-1:0][`L2MEM_BYTEEN_WIDTH-1:0] per_cluster_mem_req_byteen;
     wire [`NUM_CLUSTERS-1:0][`L2MEM_ADDR_WIDTH-1:0]  per_cluster_mem_req_addr;
-    wire [`NUM_CLUSTERS-1:0][`L2MEM_LINE_WIDTH-1:0]  per_cluster_mem_req_data;
+    wire [`NUM_CLUSTERS-1:0][`L2MEM_DATA_WIDTH-1:0]  per_cluster_mem_req_data;
     wire [`NUM_CLUSTERS-1:0][`L2MEM_TAG_WIDTH-1:0]   per_cluster_mem_req_tag;
     wire [`NUM_CLUSTERS-1:0]                         per_cluster_mem_req_ready;
 
     wire [`NUM_CLUSTERS-1:0]                         per_cluster_mem_rsp_valid;
-    wire [`NUM_CLUSTERS-1:0][`L2MEM_LINE_WIDTH-1:0]  per_cluster_mem_rsp_data;
+    wire [`NUM_CLUSTERS-1:0][`L2MEM_DATA_WIDTH-1:0]  per_cluster_mem_rsp_data;
     wire [`NUM_CLUSTERS-1:0][`L2MEM_TAG_WIDTH-1:0]   per_cluster_mem_rsp_tag;
     wire [`NUM_CLUSTERS-1:0]                         per_cluster_mem_rsp_ready;
 
@@ -85,6 +85,7 @@ module Vortex (
             .CACHE_SIZE         (`L3CACHE_SIZE),
             .CACHE_LINE_SIZE    (`L3CACHE_LINE_SIZE),
             .NUM_BANKS          (`L3NUM_BANKS),
+            .NUM_PORTS          (`L3NUM_PORTS),
             .WORD_SIZE          (`L3WORD_SIZE),
             .NUM_REQS           (`L3NUM_REQS),
             .CREQ_SIZE          (`L3CREQ_SIZE),
@@ -141,16 +142,18 @@ module Vortex (
 
     end else begin
 
+        `RESET_RELAY (mem_arb_reset);
+
         VX_mem_arb #(
             .NUM_REQS       (`NUM_CLUSTERS),
-            .DATA_WIDTH     (`L3MEM_LINE_WIDTH),            
+            .DATA_WIDTH     (`L3MEM_DATA_WIDTH),            
             .ADDR_WIDTH     (`L3MEM_ADDR_WIDTH),
             .TAG_IN_WIDTH   (`L2MEM_TAG_WIDTH),
             .BUFFERED_REQ   (1),
             .BUFFERED_RSP   (1)
         ) mem_arb (
             .clk            (clk),
-            .reset          (reset),
+            .reset          (mem_arb_reset),
 
             // Core request
             .req_valid_in   (per_cluster_mem_req_valid),
@@ -201,12 +204,12 @@ module Vortex (
     always @(posedge clk) begin
         if (mem_req_valid && mem_req_ready) begin
             if (mem_req_rw)
-                $display("%t: MEM Wr Req: addr=%0h, tag=%0h, byteen=%0h data=%0h", $time, `TO_FULL_ADDR(mem_req_addr), mem_req_tag, mem_req_byteen, mem_req_data);
+                dpi_trace("%d: MEM Wr Req: addr=%0h, tag=%0h, byteen=%0h data=%0h\n", $time, `TO_FULL_ADDR(mem_req_addr), mem_req_tag, mem_req_byteen, mem_req_data);
             else
-                $display("%t: MEM Rd Req: addr=%0h, tag=%0h, byteen=%0h", $time, `TO_FULL_ADDR(mem_req_addr), mem_req_tag, mem_req_byteen);
+                dpi_trace("%d: MEM Rd Req: addr=%0h, tag=%0h, byteen=%0h\n", $time, `TO_FULL_ADDR(mem_req_addr), mem_req_tag, mem_req_byteen);
         end
         if (mem_rsp_valid && mem_rsp_ready) begin
-            $display("%t: MEM Rsp: tag=%0h, data=%0h", $time, mem_rsp_tag, mem_rsp_data);
+            dpi_trace("%d: MEM Rsp: tag=%0h, data=%0h\n", $time, mem_rsp_tag, mem_rsp_data);
         end
     end
 `endif

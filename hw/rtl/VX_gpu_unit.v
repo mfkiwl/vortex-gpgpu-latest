@@ -25,26 +25,22 @@ module VX_gpu_unit #(
     gpu_barrier_t   barrier;
     gpu_split_t     split;
     
-    wire is_wspawn = (gpu_req_if.op_type == `GPU_WSPAWN);
-    wire is_tmc    = (gpu_req_if.op_type == `GPU_TMC);
-    wire is_split  = (gpu_req_if.op_type == `GPU_SPLIT);
-    wire is_bar    = (gpu_req_if.op_type == `GPU_BAR);
+    wire is_wspawn = (gpu_req_if.op_type == `INST_GPU_WSPAWN);
+    wire is_tmc    = (gpu_req_if.op_type == `INST_GPU_TMC);
+    wire is_split  = (gpu_req_if.op_type == `INST_GPU_SPLIT);
+    wire is_bar    = (gpu_req_if.op_type == `INST_GPU_BAR);
 
     // tmc
 
-    wire [`NUM_THREADS-1:0] tmc_new_mask;           
-    for (genvar i = 0; i < `NUM_THREADS; i++) begin
-        assign tmc_new_mask[i] = (i < gpu_req_if.rs1_data[0]);
-    end    
     assign tmc.valid = is_tmc;
-    assign tmc.tmask = tmc_new_mask;
+    assign tmc.tmask = `NUM_THREADS'(gpu_req_if.rs1_data[gpu_req_if.tid]);
 
     // wspawn
 
     wire [31:0] wspawn_pc = gpu_req_if.rs2_data;
     wire [`NUM_WARPS-1:0] wspawn_wmask;
     for (genvar i = 0; i < `NUM_WARPS; i++) begin
-        assign wspawn_wmask[i] = (i < gpu_req_if.rs1_data[0]);
+        assign wspawn_wmask[i] = (i < gpu_req_if.rs1_data[gpu_req_if.tid]);
     end
     assign wspawn.valid = is_wspawn;
     assign wspawn.wmask = wspawn_wmask;
@@ -52,25 +48,25 @@ module VX_gpu_unit #(
 
     // split
 
-    wire [`NUM_THREADS-1:0] split_then_mask;
-    wire [`NUM_THREADS-1:0] split_else_mask;
+    wire [`NUM_THREADS-1:0] split_then_tmask;
+    wire [`NUM_THREADS-1:0] split_else_tmask;
 
     for (genvar i = 0; i < `NUM_THREADS; i++) begin
         wire taken = gpu_req_if.rs1_data[i][0];
-        assign split_then_mask[i] = gpu_req_if.tmask[i] & taken;
-        assign split_else_mask[i] = gpu_req_if.tmask[i] & ~taken;
+        assign split_then_tmask[i] = gpu_req_if.tmask[i] & taken;
+        assign split_else_tmask[i] = gpu_req_if.tmask[i] & ~taken;
     end
 
-    assign split.valid     = is_split;
-    assign split.diverged  = (| split_then_mask) && (| split_else_mask);
-    assign split.then_mask = split_then_mask;
-    assign split.else_mask = split_else_mask;
-    assign split.pc        = gpu_req_if.next_PC;
+    assign split.valid      = is_split;
+    assign split.diverged   = (| split_then_tmask) && (| split_else_tmask);
+    assign split.then_tmask = split_then_tmask;
+    assign split.else_tmask = split_else_tmask;
+    assign split.pc         = gpu_req_if.next_PC;
 
     // barrier
     
     assign barrier.valid   = is_bar;
-    assign barrier.id      = gpu_req_if.rs1_data[0][`NB_BITS-1:0];
+    assign barrier.id      = gpu_req_if.rs1_data[gpu_req_if.tid][`NB_BITS-1:0];
     assign barrier.size_m1 = (`NW_BITS)'(gpu_req_if.rs2_data - 1);
 
     // output
@@ -78,7 +74,7 @@ module VX_gpu_unit #(
     wire stall = ~gpu_commit_if.ready && gpu_commit_if.valid;
 
     VX_pipe_register #(
-        .DATAW  (1 + `NW_BITS + `NUM_THREADS + 32 + `NR_BITS + 1 + `GPU_TMC_SIZE + `GPU_WSPAWN_SIZE + `GPU_SPLIT_SIZE + `GPU_BARRIER_SIZE),
+        .DATAW  (1 + `NW_BITS + `NUM_THREADS + 32 + `NR_BITS + 1 + `GPU_TMC_BITS + `GPU_WSPAWN_BITS + `GPU_SPLIT_BITS + `GPU_BARRIER_BITS),
         .RESETW (1)
     ) pipe_reg (
         .clk      (clk),
@@ -96,12 +92,6 @@ module VX_gpu_unit #(
     // can accept new request?
     assign gpu_req_if.ready = ~stall;
 
-    `SCOPE_ASSIGN (gpu_req_fire, gpu_req_if.valid && gpu_req_if.ready);
-    `SCOPE_ASSIGN (gpu_req_wid, gpu_req_if.wid);
-    `SCOPE_ASSIGN (gpu_req_tmask, gpu_req_if.tmask);
-    `SCOPE_ASSIGN (gpu_req_op_type, gpu_req_if.op_type);
-    `SCOPE_ASSIGN (gpu_req_rs1, gpu_req_if.rs1_data[0]); 
-    `SCOPE_ASSIGN (gpu_req_rs2, gpu_req_if.rs2_data);
     `SCOPE_ASSIGN (gpu_rsp_valid, warp_ctl_if.valid);
     `SCOPE_ASSIGN (gpu_rsp_wid, warp_ctl_if.wid);
     `SCOPE_ASSIGN (gpu_rsp_tmc, warp_ctl_if.tmc);

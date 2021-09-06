@@ -15,9 +15,8 @@ module VX_ibuffer #(
 
     `UNUSED_PARAM (CORE_ID)
     
-    localparam DATAW   = `NUM_THREADS + 32 + `EX_BITS + `OP_BITS + `FRM_BITS + 1 + (`NR_BITS * 4) + 32 + 1 + 1 + `NUM_REGS;
-    localparam SIZE    = 3;
-    localparam ADDRW   = $clog2(SIZE);
+    localparam DATAW   = `NUM_THREADS + 32 + `EX_BITS + `INST_OP_BITS + `INST_FRM_BITS + 1 + (`NR_BITS * 4) + 32 + 1 + 1 + `NUM_REGS;
+    localparam ADDRW   = $clog2(`IBUF_SIZE+1);
     localparam NWARPSW = $clog2(`NUM_WARPS+1);
 
     reg [`NUM_WARPS-1:0][ADDRW-1:0] used_r;
@@ -38,8 +37,10 @@ module VX_ibuffer #(
 
         wire is_head_ptr = empty_r[i] || (alm_empty_r[i] && reading);
 
-        VX_skid_buffer #(
-            .DATAW (DATAW)
+        VX_elastic_buffer #(
+            .DATAW (DATAW),
+            .SIZE  (`IBUF_SIZE),
+            .OUTPUT_REG (`IBUF_SIZE > 2)
         ) queue (
             .clk      (clk),
             .reset    (reset),
@@ -63,7 +64,7 @@ module VX_ibuffer #(
                         empty_r[i] <= 0;
                         if (used_r[i] == 1)
                             alm_empty_r[i] <= 0;
-                        if (used_r[i] == ADDRW'(SIZE-1))
+                        if (used_r[i] == ADDRW'(`IBUF_SIZE))
                             full_r[i] <= 1;
                     end
                 end else if (reading) begin
@@ -91,8 +92,8 @@ module VX_ibuffer #(
     ///////////////////////////////////////////////////////////////////////////
 
     reg [`NUM_WARPS-1:0] valid_table, valid_table_n;
-    reg [`NUM_WARPS-1:0] schedule_table, schedule_table_n;
     reg [`NW_BITS-1:0] deq_wid, deq_wid_n;
+    reg [`NW_BITS-1:0] deq_wid_rr, deq_wid_rr_n;
     reg deq_valid, deq_valid_n;
     reg [DATAW-1:0] deq_instr, deq_instr_n;
     reg [NWARPSW-1:0] num_warps;
@@ -108,34 +109,34 @@ module VX_ibuffer #(
         end
     end
 
+    // round-robin warp scheduling
+    VX_rr_arbiter #(
+        .NUM_REQS (`NUM_WARPS)
+    ) rr_arbiter (
+        .clk      (clk),
+        .reset    (reset),          
+        .requests (valid_table_n), 
+        .grant_index (deq_wid_rr_n),
+        `UNUSED_PIN (grant_valid),
+        `UNUSED_PIN (grant_onehot),
+        `UNUSED_PIN (enable)
+    );
+
     // schedule the next instruction to issue
     always @(*) begin
-        deq_valid_n = enq_fire;
-        deq_wid_n   = decode_if.wid;
-        deq_instr_n = q_data_in;  
         if (num_warps > 1) begin
             deq_valid_n = 1;
-            for (integer i = `NUM_WARPS-1; i >= 0; --i) begin
-                if (schedule_table[i]) begin
-                    deq_wid_n   = `NW_BITS'(i);          
-                    deq_instr_n = q_data_out[i];
-                end
-            end
+            deq_wid_n   = deq_wid_rr;          
+            deq_instr_n = q_data_out[deq_wid_rr];
         end else if (1 == num_warps && !(deq_fire && q_alm_empty[deq_wid])) begin
             deq_valid_n = 1;
             deq_wid_n   = deq_wid;
             deq_instr_n = deq_fire ? q_data_prev[deq_wid] : q_data_out[deq_wid];
-        end   
-    end
-
-    // do round-robin scheduling with multiple active warps
-    always @(*) begin
-        if ($countones(schedule_table) <= 1) begin
-            schedule_table_n = valid_table_n;            
         end else begin
-            schedule_table_n = schedule_table;
+            deq_valid_n = enq_fire;
+            deq_wid_n   = decode_if.wid;
+            deq_instr_n = q_data_in;
         end
-        schedule_table_n[deq_wid_n] = 0;
     end
 
     wire warp_added   = enq_fire && q_empty[decode_if.wid];
@@ -143,14 +144,14 @@ module VX_ibuffer #(
     
     always @(posedge clk) begin
         if (reset)  begin            
-            valid_table    <= 0;
-            deq_valid      <= 0;  
-            num_warps      <= 0;         
-            schedule_table <= 0;
+            valid_table <= 0;
+            deq_valid   <= 0;  
+            num_warps   <= 0;
+            deq_wid_rr  <= 0;
         end else begin
-            valid_table    <= valid_table_n;            
-            deq_valid      <= deq_valid_n;
-            schedule_table <= schedule_table_n;
+            valid_table <= valid_table_n;            
+            deq_valid   <= deq_valid_n;
+            deq_wid_rr  <= deq_wid_rr_n;
 
             if (warp_added && !warp_removed) begin
                 num_warps <= num_warps + NWARPSW'(1);
@@ -160,10 +161,11 @@ module VX_ibuffer #(
         end
             
         deq_wid   <= deq_wid_n;
-        deq_instr <= deq_instr_n;     
+        deq_instr <= deq_instr_n;
     end
     
     assign decode_if.ready = ~q_full[decode_if.wid];
+    
     assign q_data_in = {decode_if.tmask, 
                         decode_if.PC, 
                         decode_if.ex_type, 

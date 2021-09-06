@@ -18,11 +18,13 @@ module VX_tag_access #(
     input wire                          reset,
 
 `ifdef DBG_CACHE_REQ_INFO
-`IGNORE_WARNINGS_BEGIN
+`IGNORE_UNUSED_BEGIN
     input wire[31:0]                    debug_pc,
     input wire[`NW_BITS-1:0]            debug_wid,
-`IGNORE_WARNINGS_END
+`IGNORE_UNUSED_END
 `endif
+
+    input wire                          stall,
     
     // read/fill
     input wire                          lookup,
@@ -44,38 +46,36 @@ module VX_tag_access #(
     wire [`LINE_SELECT_BITS-1:0] line_addr = addr [`LINE_SELECT_BITS-1:0];
 
     VX_sp_ram #(
-        .DATAW(`TAG_SELECT_BITS + 1),
-        .SIZE(`LINES_PER_BANK),
-        .INITZERO(1),
-        .RWCHECK(1)
+        .DATAW       (`TAG_SELECT_BITS + 1),
+        .SIZE        (`LINES_PER_BANK),
+        .NO_RWCHECK  (1)
     ) tag_store (
-        .clk(clk),                 
-        .addr(line_addr),   
-        .wren(fill),
-        .byteen(1'b1),
-        .rden(1'b1),
-        .din({!is_flush, line_tag}),
-        .dout({read_valid, read_tag})
+        .clk(  clk),                 
+        .addr  (line_addr),   
+        .wren  (fill),
+        .wdata ({!is_flush, line_tag}),
+        .rden  (1'b1),
+        .rdata ({read_valid, read_tag})
     );
 
     assign tag_match = read_valid && (line_tag == read_tag);
 
+    `UNUSED_VAR (stall)
+    
 `ifdef DBG_PRINT_CACHE_TAG
     always @(posedge clk) begin          
-        if (fill) begin
+        if (fill && ~stall) begin
             if (is_flush) begin
-                $display("%t: cache%0d:%0d tag-flush: addr=%0h, blk_addr=%0d", $time, CACHE_ID, BANK_ID, `LINE_TO_BYTE_ADDR(addr, BANK_ID), line_addr);
+                dpi_trace("%d: cache%0d:%0d tag-flush: addr=%0h, blk_addr=%0d\n", $time, CACHE_ID, BANK_ID, `LINE_TO_BYTE_ADDR(addr, BANK_ID), line_addr);
             end else begin
-                $display("%t: cache%0d:%0d tag-fill: addr=%0h, blk_addr=%0d, tag_id=%0h, old_tag_id=%0h", $time, CACHE_ID, BANK_ID, `LINE_TO_BYTE_ADDR(addr, BANK_ID), line_addr, line_tag, read_tag);
-                if (tag_match) begin
-                    $display("%t: warning: redundant fill - addr=%0h", $time, `LINE_TO_BYTE_ADDR(addr, BANK_ID));
-                end
+                dpi_trace("%d: cache%0d:%0d tag-fill: addr=%0h, blk_addr=%0d, tag_id=%0h, old_tag_id=%0h\n", $time, CACHE_ID, BANK_ID, `LINE_TO_BYTE_ADDR(addr, BANK_ID), line_addr, line_tag, read_tag);
             end
-        end else if (lookup) begin                
+        end
+        if (lookup && ~stall) begin                
             if (tag_match) begin
-                $display("%t: cache%0d:%0d tag-hit: addr=%0h, wid=%0d, PC=%0h, blk_addr=%0d, tag_id=%0h", $time, CACHE_ID, BANK_ID, `LINE_TO_BYTE_ADDR(addr, BANK_ID), debug_wid, debug_pc, line_addr, line_tag);                
+                dpi_trace("%d: cache%0d:%0d tag-hit: addr=%0h, wid=%0d, PC=%0h, blk_addr=%0d, tag_id=%0h\n", $time, CACHE_ID, BANK_ID, `LINE_TO_BYTE_ADDR(addr, BANK_ID), debug_wid, debug_pc, line_addr, line_tag);                
             end else begin
-                $display("%t: cache%0d:%0d tag-miss: addr=%0h, wid=%0d, PC=%0h, blk_addr=%0d, tag_id=%0h, old_tag_id=%0h", $time, CACHE_ID, BANK_ID, `LINE_TO_BYTE_ADDR(addr, BANK_ID), debug_wid, debug_pc, line_addr, line_tag, read_tag);
+                dpi_trace("%d: cache%0d:%0d tag-miss: addr=%0h, wid=%0d, PC=%0h, blk_addr=%0d, tag_id=%0h, old_tag_id=%0h\n", $time, CACHE_ID, BANK_ID, `LINE_TO_BYTE_ADDR(addr, BANK_ID), debug_wid, debug_pc, line_addr, line_tag, read_tag);
             end  
         end          
     end    

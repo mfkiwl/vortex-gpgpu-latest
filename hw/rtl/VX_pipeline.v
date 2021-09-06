@@ -48,66 +48,67 @@ module VX_pipeline #(
     // Dcache request
     //
 
-    VX_dcache_core_req_if #(
-        .NUM_REQS(`NUM_THREADS), 
-        .WORD_SIZE(4), 
-        .CORE_TAG_WIDTH(`DCORE_TAG_WIDTH)
-    ) dcache_core_req_if();
+    VX_dcache_req_if #(
+        .NUM_REQS  (`NUM_THREADS), 
+        .WORD_SIZE (4), 
+        .TAG_WIDTH (`DCORE_TAG_WIDTH)
+    ) dcache_req_if();
 
-    assign dcache_req_valid  = dcache_core_req_if.valid;
-    assign dcache_req_rw     = dcache_core_req_if.rw;
-    assign dcache_req_byteen = dcache_core_req_if.byteen;
-    assign dcache_req_addr   = dcache_core_req_if.addr;
-    assign dcache_req_data   = dcache_core_req_if.data;
-    assign dcache_req_tag    = dcache_core_req_if.tag;
-    assign dcache_core_req_if.ready = dcache_req_ready;
+    assign dcache_req_valid  = dcache_req_if.valid;
+    assign dcache_req_rw     = dcache_req_if.rw;
+    assign dcache_req_byteen = dcache_req_if.byteen;
+    assign dcache_req_addr   = dcache_req_if.addr;
+    assign dcache_req_data   = dcache_req_if.data;
+    assign dcache_req_tag    = dcache_req_if.tag;
+    assign dcache_req_if.ready = dcache_req_ready;
  
     //
     // Dcache response
     //
 
-    VX_dcache_core_rsp_if #(
-        .NUM_REQS(`NUM_THREADS), 
-        .WORD_SIZE(4), 
-        .CORE_TAG_WIDTH(`DCORE_TAG_WIDTH)
-    ) dcache_core_rsp_if();
+    VX_dcache_rsp_if #(
+        .NUM_REQS  (`NUM_THREADS), 
+        .WORD_SIZE (4), 
+        .TAG_WIDTH (`DCORE_TAG_WIDTH)
+    ) dcache_rsp_if();
 
-    assign dcache_core_rsp_if.valid = dcache_rsp_valid;
-    assign dcache_core_rsp_if.tmask = dcache_rsp_tmask;
-    assign dcache_core_rsp_if.data  = dcache_rsp_data;
-    assign dcache_core_rsp_if.tag   = dcache_rsp_tag;
-    assign dcache_rsp_ready = dcache_core_rsp_if.ready;
+    assign dcache_rsp_if.valid = dcache_rsp_valid;
+    assign dcache_rsp_if.tmask = dcache_rsp_tmask;
+    assign dcache_rsp_if.data  = dcache_rsp_data;
+    assign dcache_rsp_if.tag   = dcache_rsp_tag;
+    assign dcache_rsp_ready = dcache_rsp_if.ready;
 
     //
     // Icache request
     //
 
-    VX_icache_core_req_if #(
-        .WORD_SIZE(4), 
-        .CORE_TAG_WIDTH(`ICORE_TAG_WIDTH)
-    ) icache_core_req_if();       
+    VX_icache_req_if #(
+        .WORD_SIZE (4), 
+        .TAG_WIDTH (`ICORE_TAG_WIDTH)
+    ) icache_req_if();       
 
-    assign icache_req_valid  = icache_core_req_if.valid;
-    assign icache_req_addr   = icache_core_req_if.addr;
-    assign icache_req_tag    = icache_core_req_if.tag;
-    assign icache_core_req_if.ready = icache_req_ready;
+    assign icache_req_valid  = icache_req_if.valid;
+    assign icache_req_addr   = icache_req_if.addr;
+    assign icache_req_tag    = icache_req_if.tag;
+    assign icache_req_if.ready = icache_req_ready;
 
     //
     // Icache response
     //
 
-    VX_icache_core_rsp_if #(
-        .WORD_SIZE(4), 
-        .CORE_TAG_WIDTH(`ICORE_TAG_WIDTH)
-    ) icache_core_rsp_if();    
+    VX_icache_rsp_if #(
+        .WORD_SIZE (4), 
+        .TAG_WIDTH (`ICORE_TAG_WIDTH)
+    ) icache_rsp_if();    
 
-    assign icache_core_rsp_if.valid = icache_rsp_valid;
-    assign icache_core_rsp_if.data  = icache_rsp_data;
-    assign icache_core_rsp_if.tag   = icache_rsp_tag;
-    assign icache_rsp_ready = icache_core_rsp_if.ready;
+    assign icache_rsp_if.valid = icache_rsp_valid;
+    assign icache_rsp_if.data  = icache_rsp_data;
+    assign icache_rsp_if.tag   = icache_rsp_tag;
+    assign icache_rsp_ready = icache_rsp_if.ready;
 
     ///////////////////////////////////////////////////////////////////////////
 
+    VX_fetch_to_csr_if  fetch_to_csr_if();
     VX_cmt_to_csr_if    cmt_to_csr_if();
     VX_decode_if        decode_if();
     VX_branch_ctl_if    branch_ctl_if();
@@ -115,8 +116,10 @@ module VX_pipeline #(
     VX_ifetch_rsp_if    ifetch_rsp_if();
     VX_alu_req_if       alu_req_if();
     VX_lsu_req_if       lsu_req_if();
-    VX_csr_req_if       csr_req_if(); 
+    VX_csr_req_if       csr_req_if();
+`ifdef EXT_F_ENABLE 
     VX_fpu_req_if       fpu_req_if(); 
+`endif
     VX_gpu_req_if       gpu_req_if();
     VX_writeback_if     writeback_if();     
     VX_wstall_if        wstall_if();
@@ -125,7 +128,9 @@ module VX_pipeline #(
     VX_commit_if        ld_commit_if();
     VX_commit_if        st_commit_if();
     VX_commit_if        csr_commit_if();  
+`ifdef EXT_F_ENABLE
     VX_commit_if        fpu_commit_if();     
+`endif
     VX_commit_if        gpu_commit_if();     
 
 `ifdef PERF_ENABLE
@@ -144,13 +149,14 @@ module VX_pipeline #(
         `SCOPE_BIND_VX_pipeline_fetch
         .clk            (clk),
         .reset          (fetch_reset),
-        .icache_req_if  (icache_core_req_if),
-        .icache_rsp_if  (icache_core_rsp_if), 
+        .icache_req_if  (icache_req_if),
+        .icache_rsp_if  (icache_rsp_if), 
         .wstall_if      (wstall_if),
         .join_if        (join_if),        
         .warp_ctl_if    (warp_ctl_if),
         .branch_ctl_if  (branch_ctl_if),
         .ifetch_rsp_if  (ifetch_rsp_if),
+        .fetch_to_csr_if(fetch_to_csr_if),
         .busy           (busy)
     );
 
@@ -183,7 +189,9 @@ module VX_pipeline #(
         .alu_req_if     (alu_req_if),
         .lsu_req_if     (lsu_req_if),        
         .csr_req_if     (csr_req_if),
+    `ifdef EXT_F_ENABLE
         .fpu_req_if     (fpu_req_if),
+    `endif
         .gpu_req_if     (gpu_req_if)
     );
 
@@ -200,15 +208,18 @@ module VX_pipeline #(
         .perf_pipeline_if (perf_pipeline_if),
     `endif 
 
-        .dcache_req_if  (dcache_core_req_if),
-        .dcache_rsp_if  (dcache_core_rsp_if),
+        .dcache_req_if  (dcache_req_if),
+        .dcache_rsp_if  (dcache_rsp_if),
 
-        .cmt_to_csr_if  (cmt_to_csr_if),                 
+        .cmt_to_csr_if  (cmt_to_csr_if),   
+        .fetch_to_csr_if(fetch_to_csr_if),              
         
         .alu_req_if     (alu_req_if),
         .lsu_req_if     (lsu_req_if),        
         .csr_req_if     (csr_req_if),
+    `ifdef EXT_F_ENABLE
         .fpu_req_if     (fpu_req_if),
+    `endif
         .gpu_req_if     (gpu_req_if),
 
         .warp_ctl_if    (warp_ctl_if),
@@ -217,7 +228,9 @@ module VX_pipeline #(
         .ld_commit_if   (ld_commit_if),        
         .st_commit_if   (st_commit_if),       
         .csr_commit_if  (csr_commit_if),
+    `ifdef EXT_F_ENABLE
         .fpu_commit_if  (fpu_commit_if),
+    `endif
         .gpu_commit_if  (gpu_commit_if),        
         
         .busy           (busy)
@@ -233,7 +246,9 @@ module VX_pipeline #(
         .ld_commit_if   (ld_commit_if),        
         .st_commit_if   (st_commit_if),
         .csr_commit_if  (csr_commit_if),
+    `ifdef EXT_F_ENABLE
         .fpu_commit_if  (fpu_commit_if),
+    `endif
         .gpu_commit_if  (gpu_commit_if),
         
         .writeback_if   (writeback_if),

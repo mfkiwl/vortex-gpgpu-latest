@@ -76,7 +76,7 @@ inline void vx_join() {
 
 // Warp Barrier
 inline void vx_barrier(unsigned barried_id, unsigned num_warps) {
-    asm volatile (".insn s 0x6b, 4, %1, 0cd (%0)" :: "r"(barried_id), "r"(num_warps));
+    asm volatile (".insn s 0x6b, 4, %1, 0(%0)" :: "r"(barried_id), "r"(num_warps));
 }
 
 // Return active warp's thread id 
@@ -118,6 +118,13 @@ inline int vx_warp_gid() {
 inline int vx_core_id() {
     int result;
     asm volatile ("csrr %0, %1" : "=r"(result) : "i"(CSR_GCID));
+    return result; 
+}
+
+// Return current threadk mask
+inline int vx_thread_mask() {
+    int result;
+    asm volatile ("csrr %0, %1" : "=r"(result) : "i"(CSR_TMASK));
     return result; 
 }
 

@@ -18,7 +18,9 @@ module VX_issue #(
     VX_alu_req_if   alu_req_if,
     VX_lsu_req_if   lsu_req_if,    
     VX_csr_req_if   csr_req_if,
+`ifdef EXT_F_ENABLE
     VX_fpu_req_if   fpu_req_if,    
+`endif
     VX_gpu_req_if   gpu_req_if
 );
     VX_ibuffer_if ibuffer_if();
@@ -28,11 +30,15 @@ module VX_issue #(
 
     wire scoreboard_delay;
 
+    `RESET_RELAY (ibuf_reset);
+    `RESET_RELAY (gpr_reset);
+    `RESET_RELAY (demux_reset);
+
     VX_ibuffer #(
         .CORE_ID(CORE_ID)
     ) ibuffer (
         .clk        (clk),
-        .reset      (reset), 
+        .reset      (ibuf_reset), 
         .decode_if  (decode_if),
         .ibuffer_if (ibuffer_if) 
     );
@@ -56,7 +62,7 @@ module VX_issue #(
         .CORE_ID(CORE_ID)
     ) gpr_stage (
         .clk          (clk),      
-        .reset        (reset),          
+        .reset        (gpr_reset),          
         .writeback_if (writeback_if),
         .gpr_req_if   (gpr_req_if),
         .gpr_rsp_if   (gpr_rsp_if)
@@ -78,13 +84,15 @@ module VX_issue #(
 
     VX_instr_demux instr_demux (
         .clk        (clk),      
-        .reset      (reset),
+        .reset      (demux_reset),
         .ibuffer_if (execute_if),
         .gpr_rsp_if (gpr_rsp_if),
         .alu_req_if (alu_req_if),
         .lsu_req_if (lsu_req_if),        
         .csr_req_if (csr_req_if),
+    `ifdef EXT_F_ENABLE
         .fpu_req_if (fpu_req_if),
+    `endif
         .gpu_req_if (gpu_req_if)
     );     
 
@@ -182,44 +190,46 @@ module VX_issue #(
 `ifdef DBG_PRINT_PIPELINE
     always @(posedge clk) begin
         if (alu_req_if.valid && alu_req_if.ready) begin
-            $write("%t: core%0d-issue: wid=%0d, PC=%0h, ex=ALU, tmask=%b, rd=%0d, rs1_data=", 
+            dpi_trace("%d: core%0d-issue: wid=%0d, PC=%0h, ex=ALU, tmask=%b, rd=%0d, rs1_data=", 
                 $time, CORE_ID, alu_req_if.wid, alu_req_if.PC, alu_req_if.tmask, alu_req_if.rd);
-            `PRINT_ARRAY1D(alu_req_if.rs1_data, `NUM_THREADS);
-            $write(", rs2_data=");
-            `PRINT_ARRAY1D(alu_req_if.rs2_data, `NUM_THREADS);
-            $write("\n");
+            `TRACE_ARRAY1D(alu_req_if.rs1_data, `NUM_THREADS);
+            dpi_trace(", rs2_data=");
+            `TRACE_ARRAY1D(alu_req_if.rs2_data, `NUM_THREADS);
+            dpi_trace("\n");
         end
         if (lsu_req_if.valid && lsu_req_if.ready) begin
-            $write("%t: core%0d-issue: wid=%0d, PC=%0h, ex=LSU, tmask=%b, rd=%0d, offset=%0h, addr=", 
+            dpi_trace("%d: core%0d-issue: wid=%0d, PC=%0h, ex=LSU, tmask=%b, rd=%0d, offset=%0h, addr=", 
                 $time, CORE_ID, lsu_req_if.wid, lsu_req_if.PC, lsu_req_if.tmask, lsu_req_if.rd, lsu_req_if.offset); 
-            `PRINT_ARRAY1D(lsu_req_if.base_addr, `NUM_THREADS);
-            $write(", data=");
-            `PRINT_ARRAY1D(lsu_req_if.store_data, `NUM_THREADS);
-            $write("\n");
+            `TRACE_ARRAY1D(lsu_req_if.base_addr, `NUM_THREADS);
+            dpi_trace(", data=");
+            `TRACE_ARRAY1D(lsu_req_if.store_data, `NUM_THREADS);
+            dpi_trace("\n");
         end
         if (csr_req_if.valid && csr_req_if.ready) begin
-            $write("%t: core%0d-issue: wid=%0d, PC=%0h, ex=CSR, tmask=%b, rd=%0d, addr=%0h, rs1_data=", 
+            dpi_trace("%d: core%0d-issue: wid=%0d, PC=%0h, ex=CSR, tmask=%b, rd=%0d, addr=%0h, rs1_data=", 
                 $time, CORE_ID, csr_req_if.wid, csr_req_if.PC, csr_req_if.tmask, csr_req_if.rd, csr_req_if.addr);   
-            `PRINT_ARRAY1D(csr_req_if.rs1_data, `NUM_THREADS);
-            $write("\n");
+            `TRACE_ARRAY1D(csr_req_if.rs1_data, `NUM_THREADS);
+            dpi_trace("\n");
         end
+    `ifdef EXT_F_ENABLE
         if (fpu_req_if.valid && fpu_req_if.ready) begin
-            $write("%t: core%0d-issue: wid=%0d, PC=%0h, ex=FPU, tmask=%b, rd=%0d, rs1_data=", 
+            dpi_trace("%d: core%0d-issue: wid=%0d, PC=%0h, ex=FPU, tmask=%b, rd=%0d, rs1_data=", 
                 $time, CORE_ID, fpu_req_if.wid, fpu_req_if.PC, fpu_req_if.tmask, fpu_req_if.rd);   
-            `PRINT_ARRAY1D(fpu_req_if.rs1_data, `NUM_THREADS);
-            $write(", rs2_data=");
-            `PRINT_ARRAY1D(fpu_req_if.rs2_data, `NUM_THREADS);
-            $write(", rs3_data=");
-            `PRINT_ARRAY1D(fpu_req_if.rs3_data, `NUM_THREADS);
-            $write("\n");
+            `TRACE_ARRAY1D(fpu_req_if.rs1_data, `NUM_THREADS);
+            dpi_trace(", rs2_data=");
+            `TRACE_ARRAY1D(fpu_req_if.rs2_data, `NUM_THREADS);
+            dpi_trace(", rs3_data=");
+            `TRACE_ARRAY1D(fpu_req_if.rs3_data, `NUM_THREADS);
+            dpi_trace("\n");
         end
+    `endif
         if (gpu_req_if.valid && gpu_req_if.ready) begin
-            $write("%t: core%0d-issue: wid=%0d, PC=%0h, ex=GPU, tmask=%b, rd=%0d, rs1_data=", 
+            dpi_trace("%d: core%0d-issue: wid=%0d, PC=%0h, ex=GPU, tmask=%b, rd=%0d, rs1_data=", 
                 $time, CORE_ID, gpu_req_if.wid, gpu_req_if.PC, gpu_req_if.tmask, gpu_req_if.rd);   
-            `PRINT_ARRAY1D(gpu_req_if.rs1_data, `NUM_THREADS);
-            $write(", rs2_data=");
-            `PRINT_ARRAY1D(gpu_req_if.rs2_data, `NUM_THREADS);
-            $write("\n");   
+            `TRACE_ARRAY1D(gpu_req_if.rs1_data, `NUM_THREADS);
+            dpi_trace(", rs2_data=");
+            `TRACE_ARRAY1D(gpu_req_if.rs2_data, `NUM_THREADS);
+            dpi_trace("\n");   
         end
     end
 `endif

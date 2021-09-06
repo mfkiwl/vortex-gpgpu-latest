@@ -1,15 +1,11 @@
 `include "VX_define.vh"
 
-`ifndef SYNTHESIS
-`include "util_dpi.vh"
-`endif
-
 module VX_muldiv (
     input wire clk,
     input wire reset,
     
     // Inputs    
-    input wire [`MUL_BITS-1:0]          alu_op,
+    input wire [`INST_MUL_BITS-1:0]     alu_op,
     input wire [`NW_BITS-1:0]           wid_in,
     input wire [`NUM_THREADS-1:0]       tmask_in,
     input wire [31:0]                   PC_in,
@@ -33,7 +29,7 @@ module VX_muldiv (
     input wire  ready_out
 ); 
 
-    wire is_div_op = `MUL_IS_DIV(alu_op);
+    wire is_div_op = `INST_MUL_IS_DIV(alu_op);
 
     wire [`NUM_THREADS-1:0][31:0] mul_result;
     wire [`NW_BITS-1:0] mul_wid_out;
@@ -48,9 +44,9 @@ module VX_muldiv (
     wire mul_valid_in = valid_in && !is_div_op;    
     wire mul_ready_in = ~stall_out || ~mul_valid_out;
 
-    wire is_mulh_in      = (alu_op != `MUL_MUL);
-    wire is_signed_mul_a = (alu_op != `MUL_MULHU);
-    wire is_signed_mul_b = (alu_op != `MUL_MULHU && alu_op != `MUL_MULHSU);
+    wire is_mulh_in      = (alu_op != `INST_MUL_MUL);
+    wire is_signed_mul_a = (alu_op != `INST_MUL_MULHU);
+    wire is_signed_mul_b = (alu_op != `INST_MUL_MULHU && alu_op != `INST_MUL_MULHSU);
 
 `ifdef IMUL_DPI
 
@@ -83,9 +79,9 @@ module VX_muldiv (
     for (genvar i = 0; i < `NUM_THREADS; i++) begin
         wire [32:0] mul_in1 = {is_signed_mul_a & alu_in1[i][31], alu_in1[i]};
         wire [32:0] mul_in2 = {is_signed_mul_b & alu_in2[i][31], alu_in2[i]};
-    `IGNORE_WARNINGS_BEGIN
+    `IGNORE_UNUSED_BEGIN
         wire [65:0] mul_result_tmp;
-    `IGNORE_WARNINGS_END
+    `IGNORE_UNUSED_END
 
         VX_multiplier #(
             .WIDTHA  (33),
@@ -127,8 +123,8 @@ module VX_muldiv (
     wire [`NR_BITS-1:0] div_rd_out;
     wire div_wb_out;
 
-    wire is_rem_op_in  = (alu_op == `MUL_REM) || (alu_op == `MUL_REMU);
-    wire is_signed_div = (alu_op == `MUL_DIV) || (alu_op == `MUL_REM);     
+    wire is_rem_op_in  = (alu_op == `INST_MUL_REM) || (alu_op == `INST_MUL_REMU);
+    wire is_signed_div = (alu_op == `INST_MUL_DIV) || (alu_op == `INST_MUL_REM);     
     wire div_valid_in  = valid_in && is_div_op; 
     wire div_ready_out = ~stall_out && ~mul_valid_out; // arbitration prioritizes MUL  
     wire div_ready_in;

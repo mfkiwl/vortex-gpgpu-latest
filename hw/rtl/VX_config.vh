@@ -38,7 +38,7 @@
 `endif
 
 `ifndef L1_BLOCK_SIZE
-`define L1_BLOCK_SIZE (`NUM_THREADS * 4)
+`define L1_BLOCK_SIZE ((`L2_ENABLE || `L3_ENABLE) ? (`NUM_THREADS * 4) : `MEM_BLOCK_SIZE)
 `endif
 
 `ifndef STARTUP_ADDR
@@ -223,6 +223,7 @@
 `define CSR_LWID        12'hCC3
 `define CSR_GWID        `CSR_MHARTID
 `define CSR_GCID        12'hCC5
+`define CSR_TMASK       12'hCC4
 
 // Machine SIMT CSRs
 `define CSR_NT          12'hFC0
@@ -230,6 +231,11 @@
 `define CSR_NC          12'hFC2
 
 // Pipeline Queues ////////////////////////////////////////////////////////////
+
+// Size of Instruction Buffer
+`ifndef IBUF_SIZE
+`define IBUF_SIZE 2
+`endif
 
 // Size of LSU Request Queue
 `ifndef LSUQ_SIZE
@@ -250,7 +256,7 @@
 
 // Core Request Queue Size
 `ifndef ICREQ_SIZE
-`define ICREQ_SIZE 4
+`define ICREQ_SIZE 0
 `endif
 
 // Core Response Queue Size
@@ -270,7 +276,7 @@
 
 // Memory Response Queue Size
 `ifndef IMRSQ_SIZE
-`define IMRSQ_SIZE 4
+`define IMRSQ_SIZE 0
 `endif
 
 // Dcache Configurable Knobs //////////////////////////////////////////////////
@@ -285,14 +291,14 @@
 `define DNUM_BANKS `NUM_THREADS
 `endif
 
-// Number of bank ports
+// Number of ports per bank
 `ifndef DNUM_PORTS
 `define DNUM_PORTS 1
 `endif
 
 // Core Request Queue Size
 `ifndef DCREQ_SIZE
-`define DCREQ_SIZE 4
+`define DCREQ_SIZE 0
 `endif
 
 // Core Response Queue Size
@@ -312,15 +318,16 @@
 
 // Memory Response Queue Size
 `ifndef DMRSQ_SIZE
-`define DMRSQ_SIZE `MAX(4, `DNUM_BANKS)
+`define DMRSQ_SIZE 0
 `endif
 
 // SM Configurable Knobs //////////////////////////////////////////////////////
 
 // per thread stack size
-`ifndef STACK_SIZE
-`define STACK_SIZE 1024
+`ifndef STACK_LOG2_SIZE
+`define STACK_LOG2_SIZE 10
 `endif
+`define STACK_SIZE (1 << `STACK_LOG2_SIZE)
 
 // Size of cache in bytes
 `ifndef SMEM_SIZE
@@ -334,7 +341,7 @@
 
 // Core Request Queue Size
 `ifndef SCREQ_SIZE
-`define SCREQ_SIZE 4
+`define SCREQ_SIZE 2
 `endif
 
 // Core Response Queue Size
@@ -354,9 +361,14 @@
 `define L2NUM_BANKS `MIN(`NUM_CORES, 4)
 `endif
 
+// Number of ports per bank
+`ifndef L2NUM_PORTS
+`define L2NUM_PORTS 1
+`endif
+
 // Core Request Queue Size
 `ifndef L2CREQ_SIZE
-`define L2CREQ_SIZE 4
+`define L2CREQ_SIZE 0
 `endif
 
 // Core Response Queue Size
@@ -376,7 +388,7 @@
 
 // Memory Response Queue Size
 `ifndef L2MRSQ_SIZE
-`define L2MRSQ_SIZE `MAX(4, (`L2NUM_BANKS * 2))
+`define L2MRSQ_SIZE 0
 `endif
 
 // L3cache Configurable Knobs /////////////////////////////////////////////////
@@ -391,9 +403,14 @@
 `define L3NUM_BANKS `MIN(`NUM_CLUSTERS, 4)
 `endif
 
+// Number of ports per bank
+`ifndef L3NUM_PORTS
+`define L3NUM_PORTS 1
+`endif
+
 // Core Request Queue Size
 `ifndef L3CREQ_SIZE
-`define L3CREQ_SIZE 4
+`define L3CREQ_SIZE 0
 `endif
 
 // Core Response Queue Size
@@ -413,7 +430,7 @@
 
 // Memory Response Queue Size
 `ifndef L3MRSQ_SIZE
-`define L3MRSQ_SIZE `MAX(4, (`L3NUM_BANKS * 2))
+`define L3MRSQ_SIZE 0
 `endif
 
 `endif

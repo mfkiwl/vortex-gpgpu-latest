@@ -135,9 +135,9 @@ module VX_shared_mem #(
     end
 
     VX_elastic_buffer #(
-        .DATAW    (NUM_BANKS * (1 + 1 + `LINE_SELECT_BITS + WORD_SIZE + `WORD_WIDTH + CORE_TAG_WIDTH + `REQS_BITS)), 
-        .SIZE     (CREQ_SIZE),
-        .BUFFERED (1)   // output should be registered for the data_store addr port
+        .DATAW      (NUM_BANKS * (1 + 1 + `LINE_SELECT_BITS + WORD_SIZE + `WORD_WIDTH + CORE_TAG_WIDTH + `REQS_BITS)), 
+        .SIZE       (CREQ_SIZE),
+        .OUTPUT_REG (1)   // output should be registered for the data_store addr port
     ) core_req_queue (
         .clk        (clk),
         .reset      (reset),
@@ -171,18 +171,17 @@ module VX_shared_mem #(
                  && creq_out_fire;
 
         VX_sp_ram #(
-            .DATAW   (`WORD_WIDTH),
-            .SIZE    (`LINES_PER_BANK),
-            .BYTEENW (WORD_SIZE),
-            .RWCHECK (1)
+            .DATAW      (`WORD_WIDTH),
+            .SIZE       (`LINES_PER_BANK),
+            .BYTEENW    (WORD_SIZE),
+            .NO_RWCHECK (1)
         ) data_store (
-            .clk    (clk),
-            .addr   (per_bank_core_req_addr[i]),          
-            .wren   (wren),  
-            .byteen (per_bank_core_req_byteen[i]),
-            .rden   (1'b1),
-            .din    (per_bank_core_req_data[i]),
-            .dout   (per_bank_core_rsp_data[i])
+            .clk   (clk),
+            .addr  (per_bank_core_req_addr[i]),
+            .wren  ({WORD_SIZE{wren}} & per_bank_core_req_byteen[i]),
+            .wdata (per_bank_core_req_data[i]),
+            .rden  (1'b1),
+            .rdata (per_bank_core_rsp_data[i])
         );
     end  
 
@@ -218,18 +217,19 @@ module VX_shared_mem #(
     reg [NUM_REQS-1:0][`WORD_WIDTH-1:0] core_rsp_data_in;
     reg [CORE_TAG_WIDTH-1:0] core_rsp_tag_in;
     
-    always @(*) begin              
-        core_rsp_valids_in = 0;
-        core_rsp_data_in   = 'x;
-        core_rsp_tag_in    = 'x;
-        bank_rsp_sel_cur   = 0;
-
+    always @(*) begin        
+        core_rsp_tag_in = 'x;
         for (integer i = NUM_BANKS-1; i >= 0; --i) begin
             if (per_bank_req_reads[i] && ~bank_rsp_sel_prv[i]) begin
                 core_rsp_tag_in = per_bank_core_req_tag[i];
             end
         end
+    end
 
+    always @(*) begin
+        core_rsp_valids_in = 0;
+        core_rsp_data_in   = 'x;
+        bank_rsp_sel_cur   = 0;
         for (integer i = 0; i < NUM_BANKS; i++) begin 
             if (per_bank_core_req_valid[i] 
              && (core_rsp_tag_in[CORE_TAG_ID_BITS-1:0] == per_bank_core_req_tag[i][CORE_TAG_ID_BITS-1:0])) begin
@@ -257,18 +257,18 @@ module VX_shared_mem #(
     );
 
 `ifdef DBG_CACHE_REQ_INFO
-`IGNORE_WARNINGS_BEGIN
+`IGNORE_UNUSED_BEGIN
     wire [NUM_BANKS-1:0][31:0]         debug_pc_st0, debug_pc_st1;
     wire [NUM_BANKS-1:0][`NW_BITS-1:0] debug_wid_st0, debug_wid_st1;
-`IGNORE_WARNINGS_END
+`IGNORE_UNUSED_END
 
     for (genvar i = 0; i < NUM_BANKS; ++i) begin
         if (CORE_TAG_WIDTH != CORE_TAG_ID_BITS && CORE_TAG_ID_BITS != 0) begin        
-            assign {debug_pc_st0[i], debug_wid_st0[i]} = per_bank_core_req_tag_unqual[i][CORE_TAG_WIDTH-1:CORE_TAG_ID_BITS];
-            assign {debug_pc_st1[i], debug_wid_st1[i]} = per_bank_core_req_tag[i][CORE_TAG_WIDTH-1:CORE_TAG_ID_BITS];        
+            assign {debug_wid_st0[i], debug_pc_st0[i]} = per_bank_core_req_tag_unqual[i][`CACHE_REQ_INFO_RNG];
+            assign {debug_wid_st1[i], debug_pc_st1[i]} = per_bank_core_req_tag[i][`CACHE_REQ_INFO_RNG];        
         end else begin
-            assign {debug_pc_st0[i], debug_wid_st0[i]} = 0;
-            assign {debug_pc_st1[i], debug_wid_st1[i]} = 0;
+            assign {debug_wid_st0[i], debug_pc_st0[i]} = 0;
+            assign {debug_wid_st1[i], debug_pc_st1[i]} = 0;
         end
     end
 `endif
@@ -276,17 +276,20 @@ module VX_shared_mem #(
 `ifdef DBG_PRINT_CACHE_BANK
     
     reg is_multi_tag_req;
-`IGNORE_WARNINGS_BEGIN
+`IGNORE_UNUSED_BEGIN
     reg [CORE_TAG_WIDTH-1:0] core_req_tag_sel;
-`IGNORE_WARNINGS_END
+`IGNORE_UNUSED_END
 
-    always @(*) begin                      
+    always @(*) begin
         core_req_tag_sel ='x;
         for (integer i = NUM_BANKS-1; i >= 0; --i) begin
             if (per_bank_core_req_valid[i]) begin
                 core_req_tag_sel = per_bank_core_req_tag[i];
             end
         end
+    end
+
+    always @(*) begin
         is_multi_tag_req = 0;
         for (integer i = 0; i < NUM_BANKS; ++i) begin
             if (per_bank_core_req_valid[i] 
@@ -298,22 +301,20 @@ module VX_shared_mem #(
 
     always @(posedge clk) begin        
         if (!crsq_in_ready) begin
-            $display("%t: *** cache%0d pipeline-stall", $time, CACHE_ID);        
+            dpi_trace("%d: *** cache%0d pipeline-stall\n", $time, CACHE_ID);        
         end
         if (is_multi_tag_req) begin
-            $display("%t: *** cache%0d multi-tag request!", $time, CACHE_ID);
+            dpi_trace("%d: *** cache%0d multi-tag request!\n", $time, CACHE_ID);
         end
         if (creq_in_fire) begin
             for (integer i = 0; i < NUM_BANKS; ++i) begin
                 if (per_bank_core_req_valid_unqual[i]) begin
                     if (per_bank_core_req_rw_unqual[i]) begin
-                        $display("%t: cache%0d:%0d core-wr-req: addr=%0h, tag=%0h, byteen=%b, data=%0h, wid=%0d, PC=%0h", 
-                            $time, CACHE_ID, i, per_bank_core_req_addr_unqual[i], per_bank_core_req_tag_unqual[i], per_bank_core_req_byteen_unqual[i], per_bank_core_req_data_unqual[i], 
-                            debug_wid_st0[i], debug_pc_st0[i]);
+                        dpi_trace("%d: cache%0d:%0d core-wr-req: addr=%0h, tag=%0h, byteen=%b, data=%0h, wid=%0d, PC=%0h\n", 
+                            $time, CACHE_ID, i, per_bank_core_req_addr_unqual[i], per_bank_core_req_tag_unqual[i], per_bank_core_req_byteen_unqual[i], per_bank_core_req_data_unqual[i], debug_wid_st0[i], debug_pc_st0[i]);
                     end else begin
-                        $display("%t: cache%0d:%0d core-rd-req: addr=%0h, tag=%0h, byteen=%b, wid=%0d, PC=%0h", 
-                            $time, CACHE_ID, i, per_bank_core_req_addr_unqual[i], per_bank_core_req_tag_unqual[i], per_bank_core_req_byteen_unqual[i], 
-                            debug_wid_st0[i], debug_pc_st0[i]);
+                        dpi_trace("%d: cache%0d:%0d core-rd-req: addr=%0h, tag=%0h, byteen=%b, wid=%0d, PC=%0h\n", 
+                            $time, CACHE_ID, i, per_bank_core_req_addr_unqual[i], per_bank_core_req_tag_unqual[i], per_bank_core_req_byteen_unqual[i], debug_wid_st0[i], debug_pc_st0[i]);
                     end
                 end
             end
@@ -322,13 +323,11 @@ module VX_shared_mem #(
             for (integer i = 0; i < NUM_BANKS; ++i) begin
                 if (per_bank_core_req_valid[i]) begin
                     if (per_bank_core_req_rw[i]) begin
-                        $display("%t: cache%0d:%0d core-wr-rsp: addr=%0h, tag=%0h, byteen=%b, data=%0h, wid=%0d, PC=%0h", 
-                            $time, CACHE_ID, i, per_bank_core_req_addr[i], per_bank_core_req_tag[i], per_bank_core_req_byteen[i], per_bank_core_req_data[i], 
-                            debug_wid_st1[i], debug_pc_st1[i]);
+                        dpi_trace("%d: cache%0d:%0d core-wr-rsp: addr=%0h, tag=%0h, byteen=%b, data=%0h, wid=%0d, PC=%0h\n", 
+                            $time, CACHE_ID, i, per_bank_core_req_addr[i], per_bank_core_req_tag[i], per_bank_core_req_byteen[i], per_bank_core_req_data[i], debug_wid_st1[i], debug_pc_st1[i]);
                     end else begin
-                        $display("%t: cache%0d:%0d core-rd-rsp: addr=%0h, tag=%0h, byteen=%b, wid=%0d, PC=%0h", 
-                            $time, CACHE_ID, i, per_bank_core_req_addr[i], per_bank_core_req_tag[i], per_bank_core_req_byteen[i], 
-                            debug_wid_st1[i], debug_pc_st1[i]);
+                        dpi_trace("%d: cache%0d:%0d core-rd-rsp: addr=%0h, tag=%0h, byteen=%b, data=%0h, wid=%0d, PC=%0h\n", 
+                            $time, CACHE_ID, i, per_bank_core_req_addr[i], per_bank_core_req_tag[i], per_bank_core_req_byteen[i], per_bank_core_rsp_data[i], debug_wid_st1[i], debug_pc_st1[i]);
                     end
                 end
             end

@@ -2,6 +2,7 @@
 
 module VX_stream_arbiter #(
     parameter NUM_REQS    = 1,
+    parameter LANES       = 1,
     parameter DATAW       = 1,
     parameter TYPE        = "R",
     parameter LOCK_ENABLE = 1,
@@ -10,21 +11,35 @@ module VX_stream_arbiter #(
     input  wire clk,
     input  wire reset,
 
-    input  wire [NUM_REQS-1:0]            valid_in,
-    input  wire [NUM_REQS-1:0][DATAW-1:0] data_in,
-    output wire [NUM_REQS-1:0]            ready_in,
+    input  wire [NUM_REQS-1:0][LANES-1:0]            valid_in,
+    input  wire [NUM_REQS-1:0][LANES-1:0][DATAW-1:0] data_in,
+    output wire [NUM_REQS-1:0][LANES-1:0]            ready_in,
 
-    output wire             valid_out,
-    output wire [DATAW-1:0] data_out,    
-    input  wire             ready_out
+    output wire [LANES-1:0]            valid_out,
+    output wire [LANES-1:0][DATAW-1:0] data_out,    
+    input  wire [LANES-1:0]            ready_out
 );
-  
-    localparam LOG_NUM_REQS = $clog2(NUM_REQS);
+    localparam LOG_NUM_REQS = `CLOG2(NUM_REQS);
 
     if (NUM_REQS > 1)  begin
         wire                    sel_valid;
         wire                    sel_ready;
-        wire [NUM_REQS-1:0]     sel_1hot;
+        wire [LOG_NUM_REQS-1:0] sel_index;
+
+        wire [NUM_REQS-1:0] valid_in_any;
+        wire [LANES-1:0] ready_in_sel;
+
+        if (LANES > 1) begin
+            for (genvar i = 0; i < NUM_REQS; i++) begin
+                assign valid_in_any[i] = (| valid_in[i]);
+            end
+            assign sel_ready = (| ready_in_sel);
+        end else begin
+            for (genvar i = 0; i < NUM_REQS; i++) begin
+                assign valid_in_any[i] = valid_in[i];
+            end
+            assign sel_ready = ready_in_sel;
+        end
 
         if (TYPE == "X") begin
             VX_fixed_arbiter #(
@@ -33,11 +48,11 @@ module VX_stream_arbiter #(
             ) sel_arb (
                 .clk          (clk),
                 .reset        (reset),
-                .requests     (valid_in),  
+                .requests     (valid_in_any),  
                 .enable       (sel_ready),     
                 .grant_valid  (sel_valid),
-                .grant_onehot (sel_1hot),
-				`UNUSED_PIN (grant_index)
+				.grant_index  (sel_index),
+                `UNUSED_PIN (grant_onehot)
             );
         end else if (TYPE == "R") begin
             VX_rr_arbiter #(
@@ -46,11 +61,11 @@ module VX_stream_arbiter #(
             ) sel_arb (
                 .clk          (clk),
                 .reset        (reset),
-                .requests     (valid_in),  
+                .requests     (valid_in_any),  
                 .enable       (sel_ready),
                 .grant_valid  (sel_valid),
-                .grant_onehot (sel_1hot),
-				`UNUSED_PIN (grant_index)
+				.grant_index  (sel_index),
+                `UNUSED_PIN (grant_onehot)
             );
         end else if (TYPE == "F") begin
             VX_fair_arbiter #(
@@ -59,11 +74,11 @@ module VX_stream_arbiter #(
             ) sel_arb (
                 .clk          (clk),
                 .reset        (reset),
-                .requests     (valid_in),  
+                .requests     (valid_in_any),  
                 .enable       (sel_ready),     
                 .grant_valid  (sel_valid),
-                .grant_onehot (sel_1hot),
-				`UNUSED_PIN (grant_index)
+				.grant_index  (sel_index),
+                `UNUSED_PIN (grant_onehot)
             );
         end else if (TYPE == "M") begin
             VX_matrix_arbiter #(
@@ -72,43 +87,52 @@ module VX_stream_arbiter #(
             ) sel_arb (
                 .clk          (clk),
                 .reset        (reset),
-                .requests     (valid_in),  
+                .requests     (valid_in_any),  
                 .enable       (sel_ready),     
                 .grant_valid  (sel_valid),
-                .grant_onehot (sel_1hot),
-				`UNUSED_PIN (grant_index)
+				.grant_index  (sel_index),
+                `UNUSED_PIN (grant_onehot)
             );
         end else begin
             $error ("invalid parameter");
         end
 
-        wire [DATAW-1:0] data_in_sel;
+        wire [LANES-1:0] valid_in_sel;
+        wire [LANES-1:0][DATAW-1:0] data_in_sel;
 
-        VX_onehot_mux #(
-            .DATAW (DATAW),
-            .N     (NUM_REQS)
-        ) data_in_mux (
-            .data_in  (data_in),
-            .sel_in   (sel_1hot),
-            .data_out (data_in_sel)
-        );
+        if (LANES > 1) begin
+            wire [NUM_REQS-1:0][(LANES * (1 + DATAW))-1:0] valid_data_in;
 
-        VX_skid_buffer #(
-            .DATAW    (DATAW),
-            .PASSTHRU (!BUFFERED)
-        ) out_buffer (
-            .clk       (clk),
-            .reset     (reset),
-            .valid_in  (sel_valid),        
-            .data_in   (data_in_sel),
-            .ready_in  (sel_ready),      
-            .valid_out (valid_out),
-            .data_out  (data_out),
-            .ready_out (ready_out)
-        );
+            for (genvar i = 0; i < NUM_REQS; i++) begin
+                assign valid_data_in[i] = {valid_in[i], data_in[i]};
+            end
+            assign {valid_in_sel, data_in_sel} = valid_data_in[sel_index];
+
+            `UNUSED_VAR (sel_valid)
+        end else begin
+            assign data_in_sel  = data_in[sel_index];
+            assign valid_in_sel = sel_valid;
+        end
 
         for (genvar i = 0; i < NUM_REQS; i++) begin
-            assign ready_in[i] = sel_1hot[i] && sel_ready;
+            assign ready_in[i] = ready_in_sel & {LANES{(sel_index == LOG_NUM_REQS'(i))}};
+        end
+
+        for (genvar i = 0; i < LANES; ++i) begin
+            VX_skid_buffer #(
+                .DATAW      (DATAW),
+                .PASSTHRU   (0 == BUFFERED),
+                .OUTPUT_REG (2 == BUFFERED)
+            ) out_buffer (
+                .clk       (clk),
+                .reset     (reset),
+                .valid_in  (valid_in_sel[i]),        
+                .data_in   (data_in_sel[i]),
+                .ready_in  (ready_in_sel[i]),      
+                .valid_out (valid_out[i]),
+                .data_out  (data_out[i]),
+                .ready_out (ready_out[i])
+            );
         end
 
     end else begin

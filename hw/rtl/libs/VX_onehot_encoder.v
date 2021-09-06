@@ -1,8 +1,9 @@
 `include "VX_platform.vh"
 
 // Fast encoder using parallel prefix computation
-// Adapter from BaseJump STL: http://bjump.org/data_out.html
+// Adapted from BaseJump STL: http://bjump.org/data_out.html
 
+`TRACING_OFF
 module VX_onehot_encoder #(
     parameter N       = 1,    
     parameter REVERSE = 0,
@@ -67,10 +68,7 @@ module VX_onehot_encoder #(
         for (genvar j = 0; j < LN; ++j) begin
             wire [N-1:0] mask;
             for (genvar i = 0; i < N; ++i) begin
-            `IGNORE_WARNINGS_BEGIN
-                wire [LN-1:0] i_w = i;
-            `IGNORE_WARNINGS_END
-                assign mask[i] = i_w[j];
+                assign mask[i] = i[j];
             end
             assign data_out[j] = |(mask & data_in);
         end
@@ -106,3 +104,4 @@ module VX_onehot_encoder #(
     end
 
 endmodule
+`TRACING_ON

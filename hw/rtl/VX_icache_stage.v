@@ -5,18 +5,18 @@ module VX_icache_stage #(
 ) (
     `SCOPE_IO_VX_icache_stage
 
-    input  wire             clk,
-    input  wire             reset,
+    input  wire         clk,
+    input  wire         reset,
     
     // Icache interface
-    VX_icache_core_req_if   icache_req_if,
-    VX_icache_core_rsp_if   icache_rsp_if,
+    VX_icache_req_if    icache_req_if,
+    VX_icache_rsp_if    icache_rsp_if,
     
     // request
-    VX_ifetch_req_if        ifetch_req_if,
+    VX_ifetch_req_if    ifetch_req_if,
 
     // reponse
-    VX_ifetch_rsp_if        ifetch_rsp_if
+    VX_ifetch_rsp_if    ifetch_rsp_if
 );
 
     `UNUSED_PARAM (CORE_ID)
@@ -33,19 +33,21 @@ module VX_icache_stage #(
     wire [`NUM_THREADS-1:0] rsp_tmask;
 
     VX_dp_ram #(
-        .DATAW(32 + `NUM_THREADS),
-        .SIZE(`NUM_WARPS),
-        .FASTRAM(1)
+        .DATAW  (32 + `NUM_THREADS),
+        .SIZE   (`NUM_WARPS),
+        .LUTRAM (1)
     ) req_metadata (
-        .clk(clk),
-        .waddr(req_tag),                                
-        .raddr(rsp_tag),
-        .wren(icache_req_fire),
-        .byteen(1'b1),
-        .rden(ifetch_rsp_if.valid),
-        .din({ifetch_req_if.PC,  ifetch_req_if.tmask}),
-        .dout({rsp_PC,           rsp_tmask})
+        .clk   (clk),        
+        .wren  (icache_req_fire),
+        .waddr (req_tag),
+        .wdata ({ifetch_req_if.PC, ifetch_req_if.tmask}),
+        .rden  (1'b1),
+        .raddr (rsp_tag),
+        .rdata ({rsp_PC, rsp_tmask})
     );
+
+    `RUNTIME_ASSERT((!ifetch_req_if.valid || ifetch_req_if.PC >= `STARTUP_ADDR), 
+        ("invalid PC=%0h, wid=%0d, tmask=%b", ifetch_req_if.PC, ifetch_req_if.wid, ifetch_req_if.tmask))
 
     // Icache Request
     assign icache_req_if.valid = ifetch_req_if.valid;
@@ -55,7 +57,7 @@ module VX_icache_stage #(
     assign ifetch_req_if.ready = icache_req_if.ready;
 
 `ifdef DBG_CACHE_REQ_INFO  
-    assign icache_req_if.tag = {ifetch_req_if.PC, ifetch_req_if.wid, req_tag};
+    assign icache_req_if.tag = {ifetch_req_if.wid, ifetch_req_if.PC, req_tag};
 `else
     assign icache_req_if.tag = req_tag;
 `endif
@@ -90,10 +92,10 @@ module VX_icache_stage #(
 `ifdef DBG_PRINT_CORE_ICACHE
     always @(posedge clk) begin
         if (icache_req_if.valid && icache_req_if.ready) begin
-            $display("%t: I$%0d req: wid=%0d, PC=%0h", $time, CORE_ID, ifetch_req_if.wid, ifetch_req_if.PC);
+            dpi_trace("%d: I$%0d req: wid=%0d, PC=%0h\n", $time, CORE_ID, ifetch_req_if.wid, ifetch_req_if.PC);
         end
         if (ifetch_rsp_if.valid && ifetch_rsp_if.ready) begin
-            $display("%t: I$%0d rsp: wid=%0d, PC=%0h, data=%0h", $time, CORE_ID, ifetch_rsp_if.wid, ifetch_rsp_if.PC, ifetch_rsp_if.data);
+            dpi_trace("%d: I$%0d rsp: wid=%0d, PC=%0h, data=%0h\n", $time, CORE_ID, ifetch_rsp_if.wid, ifetch_rsp_if.PC, ifetch_rsp_if.data);
         end
     end
 `endif

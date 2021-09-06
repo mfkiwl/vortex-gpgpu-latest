@@ -1,6 +1,10 @@
 `ifndef VX_PLATFORM
 `define VX_PLATFORM
 
+`ifndef SYNTHESIS
+`include "util_dpi.vh"
+`endif
+
 `include "VX_scope.vh"
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -13,9 +17,9 @@
     `define DEBUG_BLOCK(x)
 `endif
 
-`define DEBUG_BEGIN /* verilator lint_off UNUSED */ 
+`define IGNORE_UNUSED_BEGIN   /* verilator lint_off UNUSED */
 
-`define DEBUG_END   /* verilator lint_on UNUSED */     
+`define IGNORE_UNUSED_END     /* verilator lint_on UNUSED */
 
 `define IGNORE_WARNINGS_BEGIN /* verilator lint_off UNUSED */ \
                               /* verilator lint_off PINCONNECTEMPTY */ \
@@ -70,6 +74,7 @@
 `define USE_FAST_BRAM   (* ramstyle = "MLAB, no_rw_check" *)
 `define NO_RW_RAM_CHECK (* altera_attribute = "-name add_pass_through_logic_to_inferred_rams off" *)
 `define DISABLE_BRAM    (* ramstyle = "logic" *)
+`define PRESERVE_REG    (* preserve *)
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -91,25 +96,25 @@
 
 `define LTRIM(x,s)  x[s-1:0]
 
-`define PRINT_ARRAY1D(a, m)                     \
-    $write("{");                                \
+`define TRACE_ARRAY1D(a, m)                     \
+    dpi_trace("{");                             \
     for (integer i = (m-1); i >= 0; --i) begin  \
-        if (i != (m-1)) $write(", ");           \
-        $write("0x%0h", a[i]);                  \
+        if (i != (m-1)) dpi_trace(", ");        \
+        dpi_trace("0x%0h", a[i]);               \
     end                                         \
-    $write("}");                                \
+    dpi_trace("}");                             \
 
-`define PRINT_ARRAY2D(a, m, n)                  \
-    $write("{");                                \
+`define TRACE_ARRAY2D(a, m, n)                  \
+    dpi_trace("{");                             \
     for (integer i = n-1; i >= 0; --i) begin    \
-        if (i != (n-1)) $write(", ");           \
-        $write("{");                            \
+        if (i != (n-1)) dpi_trace(", ");        \
+        dpi_trace("{");                         \
         for (integer j = (m-1); j >= 0; --j) begin \
-            if (j != (m-1)) $write(", ");       \
-            $write("0x%0h", a[i][j]);           \
+            if (j != (m-1)) dpi_trace(", ");    \
+            dpi_trace("0x%0h", a[i][j]);        \
         end                                     \
-        $write("}");                            \
+        dpi_trace("}");                         \
     end                                         \
-    $write("}")
+    dpi_trace("}")
 
 `endif

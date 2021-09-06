@@ -37,17 +37,19 @@ module vortex_afu #(
   input                         avs_readdatavalid [NUM_LOCAL_MEM_BANKS]
 );
 
-localparam LMEM_LINE_WIDTH    = $bits(t_local_mem_data);
+localparam LMEM_DATA_WIDTH    = $bits(t_local_mem_data);
 localparam LMEM_ADDR_WIDTH    = $bits(t_local_mem_addr);
 localparam LMEM_BURST_CTRW    = $bits(t_local_mem_burst_cnt);
 
-localparam CCI_LINE_WIDTH     = $bits(t_ccip_clData);
-localparam CCI_LINE_SIZE      = CCI_LINE_WIDTH / 8;
-localparam CCI_ADDR_WIDTH     = 32 - $clog2(CCI_LINE_SIZE);
+localparam CCI_DATA_WIDTH     = $bits(t_ccip_clData);
+localparam CCI_DATA_SIZE      = CCI_DATA_WIDTH / 8;
+localparam CCI_ADDR_WIDTH     = 32 - $clog2(CCI_DATA_SIZE);
 
 localparam AVS_RD_QUEUE_SIZE  = 4;
-localparam AVS_REQ_TAGW_VX    = `MAX(`VX_MEM_TAG_WIDTH, `VX_MEM_TAG_WIDTH + $clog2(LMEM_LINE_WIDTH) - $clog2(`VX_MEM_LINE_WIDTH));
-localparam AVS_REQ_TAGW_CCI   = `MAX(CCI_ADDR_WIDTH, CCI_ADDR_WIDTH + $clog2(LMEM_LINE_WIDTH) - $clog2(CCI_LINE_WIDTH));
+localparam AVS_REQ_TAGW_VX_   = `VX_MEM_TAG_WIDTH + $clog2(LMEM_DATA_WIDTH) - $clog2(`VX_MEM_DATA_WIDTH);
+localparam AVS_REQ_TAGW_VX    = `MAX(`VX_MEM_TAG_WIDTH, AVS_REQ_TAGW_VX_);
+localparam AVS_REQ_TAGW_CCI_  = CCI_ADDR_WIDTH + $clog2(LMEM_DATA_WIDTH) - $clog2(CCI_DATA_WIDTH);
+localparam AVS_REQ_TAGW_CCI   = `MAX(CCI_ADDR_WIDTH, AVS_REQ_TAGW_CCI_);
 localparam AVS_REQ_TAGW       = `MAX(AVS_REQ_TAGW_VX, AVS_REQ_TAGW_CCI);
 
 localparam CCI_RD_WINDOW_SIZE = 8;
@@ -77,7 +79,7 @@ localparam MMIO_DEV_CAPS      = `AFU_IMAGE_MMIO_DEV_CAPS;
 
 localparam CCI_RD_QUEUE_SIZE  = 2 * CCI_RD_WINDOW_SIZE;
 localparam CCI_RD_QUEUE_TAGW  = $clog2(CCI_RD_WINDOW_SIZE);
-localparam CCI_RD_QUEUE_DATAW = CCI_LINE_WIDTH + CCI_ADDR_WIDTH;
+localparam CCI_RD_QUEUE_DATAW = CCI_DATA_WIDTH + CCI_ADDR_WIDTH;
 
 localparam STATE_IDLE         = 0;
 localparam STATE_WRITE        = 1;
@@ -102,12 +104,12 @@ wire vx_mem_req_valid;
 wire vx_mem_req_rw;
 wire [`VX_MEM_BYTEEN_WIDTH-1:0] vx_mem_req_byteen;
 wire [`VX_MEM_ADDR_WIDTH-1:0]   vx_mem_req_addr;
-wire [`VX_MEM_LINE_WIDTH-1:0]   vx_mem_req_data;
+wire [`VX_MEM_DATA_WIDTH-1:0]   vx_mem_req_data;
 wire [`VX_MEM_TAG_WIDTH-1:0]    vx_mem_req_tag;
 wire vx_mem_req_ready;
 
 wire vx_mem_rsp_valid;
-wire [`VX_MEM_LINE_WIDTH-1:0]   vx_mem_rsp_data;
+wire [`VX_MEM_DATA_WIDTH-1:0]   vx_mem_rsp_data;
 wire [`VX_MEM_TAG_WIDTH-1:0]    vx_mem_rsp_tag;
 wire vx_mem_rsp_ready;
 
@@ -129,9 +131,9 @@ wire                      cmd_scope_write;
 
 // MMIO controller ////////////////////////////////////////////////////////////
 
-`IGNORE_WARNINGS_BEGIN
+`IGNORE_UNUSED_BEGIN
 t_ccip_c0_ReqMmioHdr mmio_hdr;
-`IGNORE_WARNINGS_END
+`IGNORE_UNUSED_END
 assign mmio_hdr = t_ccip_c0_ReqMmioHdr'(cp2af_sRxPort.c0.hdr);
 
 `STATIC_ASSERT(($bits(t_ccip_c0_ReqMmioHdr)-$bits(mmio_hdr.address)) == 12, ("Oops!"))
@@ -147,21 +149,6 @@ assign cmd_scope_write = cp2af_sRxPort.c0.mmioWrValid && (MMIO_SCOPE_WRITE == mm
 
 wire [COUT_QUEUE_DATAW-1:0] cout_q_dout;
 wire cout_q_full, cout_q_empty;
-
-/*
-`DEBUG_BEGIN
-wire cp2af_sRxPort_c0_mmioWrValid = cp2af_sRxPort.c0.mmioWrValid;
-wire cp2af_sRxPort_c0_mmioRdValid = cp2af_sRxPort.c0.mmioRdValid;
-wire cp2af_sRxPort_c0_rspValid = cp2af_sRxPort.c0.rspValid;
-wire cp2af_sRxPort_c1_rspValid = cp2af_sRxPort.c1.rspValid;
-wire cp2af_sRxPort_c0TxAlmFull = cp2af_sRxPort.c0TxAlmFull;
-wire cp2af_sRxPort_c1TxAlmFull = cp2af_sRxPort.c1TxAlmFull;
-wire[$bits(mmio_hdr.address)-1:0] mmio_hdr_address = mmio_hdr.address;
-wire[$bits(mmio_hdr.length)-1:0] mmio_hdr_length = mmio_hdr.length;
-wire[$bits(mmio_hdr.tid)-1:0] mmio_hdr_tid = mmio_hdr.tid;
-wire[$bits(cp2af_sRxPort.c0.hdr.mdata)-1:0] cp2af_sRxPort_c0_hdr_mdata = cp2af_sRxPort.c0.hdr.mdata;
-`DEBUG_END
-*/
 
 wire [2:0] cmd_type = (cp2af_sRxPort.c0.mmioWrValid 
                     && (MMIO_CMD_TYPE == mmio_hdr.address)) ? 3'(cp2af_sRxPort.c0.data) : 3'h0;
@@ -199,36 +186,36 @@ always @(posedge clk) begin
       MMIO_IO_ADDR: begin
         cmd_io_addr <= t_ccip_clAddr'(cp2af_sRxPort.c0.data);
       `ifdef DBG_PRINT_OPAE 
-        $display("%t: MMIO_IO_ADDR: addr=%0h, data=0x%0h", $time, mmio_hdr.address, t_ccip_clAddr'(cp2af_sRxPort.c0.data));
+        dpi_trace("%d: MMIO_IO_ADDR: addr=%0h, data=0x%0h\n", $time, mmio_hdr.address, t_ccip_clAddr'(cp2af_sRxPort.c0.data));
       `endif
       end
       MMIO_MEM_ADDR: begin
         cmd_mem_addr <= $bits(cmd_mem_addr)'(cp2af_sRxPort.c0.data);
       `ifdef DBG_PRINT_OPAE
-        $display("%t: MMIO_MEM_ADDR: addr=%0h, data=0x%0h", $time, mmio_hdr.address, $bits(cmd_mem_addr)'(cp2af_sRxPort.c0.data));
+        dpi_trace("%d: MMIO_MEM_ADDR: addr=%0h, data=0x%0h\n", $time, mmio_hdr.address, $bits(cmd_mem_addr)'(cp2af_sRxPort.c0.data));
       `endif
       end
       MMIO_DATA_SIZE: begin
         cmd_data_size <= $bits(cmd_data_size)'(cp2af_sRxPort.c0.data);
       `ifdef DBG_PRINT_OPAE
-        $display("%t: MMIO_DATA_SIZE: addr=%0h, data=%0d", $time, mmio_hdr.address, $bits(cmd_data_size)'(cp2af_sRxPort.c0.data));
+        dpi_trace("%d: MMIO_DATA_SIZE: addr=%0h, data=%0d\n", $time, mmio_hdr.address, $bits(cmd_data_size)'(cp2af_sRxPort.c0.data));
       `endif
       end
       MMIO_CMD_TYPE: begin
       `ifdef DBG_PRINT_OPAE
-        $display("%t: MMIO_CMD_TYPE: addr=%0h, data=%0d", $time, mmio_hdr.address, $bits(cmd_type)'(cp2af_sRxPort.c0.data));
+        dpi_trace("%d: MMIO_CMD_TYPE: addr=%0h, data=%0d\n", $time, mmio_hdr.address, $bits(cmd_type)'(cp2af_sRxPort.c0.data));
       `endif
       end
     `ifdef SCOPE
       MMIO_SCOPE_WRITE: begin
       `ifdef DBG_PRINT_OPAE
-        $display("%t: MMIO_SCOPE_WRITE: addr=%0h, data=%0h", $time, mmio_hdr.address, 64'(cp2af_sRxPort.c0.data));
+        dpi_trace("%d: MMIO_SCOPE_WRITE: addr=%0h, data=%0h\n", $time, mmio_hdr.address, 64'(cp2af_sRxPort.c0.data));
       `endif
       end
     `endif
       default: begin
         `ifdef DBG_PRINT_OPAE
-          $display("%t: Unknown MMIO Wr: addr=%0h, data=%0h", $time, mmio_hdr.address, $bits(cmd_data_size)'(cp2af_sRxPort.c0.data));
+          dpi_trace("%d: Unknown MMIO Wr: addr=%0h, data=%0h\n", $time, mmio_hdr.address, $bits(cmd_data_size)'(cp2af_sRxPort.c0.data));
         `endif
       end
     endcase
@@ -256,7 +243,7 @@ always @(posedge clk) begin
         mmio_tx.data <= 64'({cout_q_dout, !cout_q_empty, 8'(state)});
       `ifdef DBG_PRINT_OPAE
         if (state != STATE_WIDTH'(mmio_tx.data)) begin
-          $display("%t: MMIO_STATUS: addr=%0h, state=%0d", $time, mmio_hdr.address, state);
+          dpi_trace("%d: MMIO_STATUS: addr=%0h, state=%0d\n", $time, mmio_hdr.address, state);
         end
       `endif
       end
@@ -264,20 +251,20 @@ always @(posedge clk) begin
       MMIO_SCOPE_READ: begin
         mmio_tx.data <= cmd_scope_rdata;
       `ifdef DBG_PRINT_OPAE
-        $display("%t: MMIO_SCOPE_READ: addr=%0h, data=%0h", $time, mmio_hdr.address, cmd_scope_rdata);
+        dpi_trace("%d: MMIO_SCOPE_READ: addr=%0h, data=%0h\n", $time, mmio_hdr.address, cmd_scope_rdata);
       `endif
       end
     `endif
       MMIO_DEV_CAPS: begin
         mmio_tx.data <= dev_caps;
       `ifdef DBG_PRINT_OPAE
-        $display("%t: MMIO_DEV_CAPS: addr=%0h, data=%0h", $time, mmio_hdr.address, dev_caps);
+        dpi_trace("%d: MMIO_DEV_CAPS: addr=%0h, data=%0h\n", $time, mmio_hdr.address, dev_caps);
       `endif
       end
       default: begin
         mmio_tx.data <= 64'h0;
       `ifdef DBG_PRINT_OPAE
-        $display("%t: Unknown MMIO Rd: addr=%0h", $time, mmio_hdr.address);
+        dpi_trace("%d: Unknown MMIO Rd: addr=%0h\n", $time, mmio_hdr.address);
       `endif
       end
     endcase
@@ -311,19 +298,19 @@ always @(posedge clk) begin
         case (cmd_type)
           CMD_MEM_READ: begin     
           `ifdef DBG_PRINT_OPAE
-            $display("%t: STATE READ: ia=%0h addr=%0h size=%0d", $time, cmd_io_addr, cmd_mem_addr, cmd_data_size);
+            dpi_trace("%d: STATE READ: ia=%0h addr=%0h size=%0d\n", $time, cmd_io_addr, cmd_mem_addr, cmd_data_size);
           `endif
             state <= STATE_READ;   
           end 
           CMD_MEM_WRITE: begin      
           `ifdef DBG_PRINT_OPAE
-            $display("%t: STATE WRITE: ia=%0h addr=%0h size=%0d", $time, cmd_io_addr, cmd_mem_addr, cmd_data_size);
+            dpi_trace("%d: STATE WRITE: ia=%0h addr=%0h size=%0d\n", $time, cmd_io_addr, cmd_mem_addr, cmd_data_size);
           `endif
             state <= STATE_WRITE;
           end
           CMD_RUN: begin        
           `ifdef DBG_PRINT_OPAE
-            $display("%t: STATE START", $time);
+            dpi_trace("%d: STATE START\n", $time);
           `endif
             vx_reset <= 1;            
             state <= STATE_START;                    
@@ -338,7 +325,7 @@ always @(posedge clk) begin
         if (cmd_read_done) begin
           state <= STATE_IDLE;
         `ifdef DBG_PRINT_OPAE
-          $display("%t: STATE IDLE", $time);
+          dpi_trace("%d: STATE IDLE\n", $time);
         `endif
         end
       end
@@ -347,7 +334,7 @@ always @(posedge clk) begin
         if (cmd_write_done) begin
           state <= STATE_IDLE;
         `ifdef DBG_PRINT_OPAE
-          $display("%t: STATE IDLE", $time);
+          dpi_trace("%d: STATE IDLE\n", $time);
         `endif
         end
       end
@@ -359,7 +346,7 @@ always @(posedge clk) begin
             vx_started <= 0;
             state <= STATE_IDLE;
           `ifdef DBG_PRINT_OPAE
-            $display("%t: STATE IDLE", $time);
+            dpi_trace("%d: STATE IDLE\n", $time);
           `endif
           end
         end else begin
@@ -387,12 +374,12 @@ wire [CCI_RD_QUEUE_DATAW-1:0] cci_rdq_dout;
 wire cci_mem_req_valid;
 wire cci_mem_req_rw;
 wire [CCI_ADDR_WIDTH-1:0] cci_mem_req_addr;
-wire [CCI_LINE_WIDTH-1:0] cci_mem_req_data;
+wire [CCI_DATA_WIDTH-1:0] cci_mem_req_data;
 wire [CCI_ADDR_WIDTH-1:0] cci_mem_req_tag;
 wire cci_mem_req_ready;
 
 wire cci_mem_rsp_valid;        
-wire [CCI_LINE_WIDTH-1:0] cci_mem_rsp_data;
+wire [CCI_DATA_WIDTH-1:0] cci_mem_rsp_data;
 wire [CCI_ADDR_WIDTH-1:0] cci_mem_rsp_tag;
 wire cci_mem_rsp_ready;
 
@@ -412,8 +399,8 @@ wire [AVS_REQ_TAGW-1:0] cci_mem_rsp_arb_tag;
 wire                    cci_mem_rsp_arb_ready;
 
 VX_to_mem #(
-  .SRC_DATA_WIDTH (CCI_LINE_WIDTH), 
-  .DST_DATA_WIDTH (LMEM_LINE_WIDTH), 
+  .SRC_DATA_WIDTH (CCI_DATA_WIDTH), 
+  .DST_DATA_WIDTH (LMEM_DATA_WIDTH), 
   .SRC_ADDR_WIDTH (CCI_ADDR_WIDTH),  
   .DST_ADDR_WIDTH (LMEM_ADDR_WIDTH),         
   .SRC_TAG_WIDTH  (CCI_ADDR_WIDTH),
@@ -425,7 +412,7 @@ VX_to_mem #(
   .mem_req_valid_in   (cci_mem_req_valid),
   .mem_req_addr_in    (cci_mem_req_addr),
   .mem_req_rw_in      (cci_mem_req_rw),
-  .mem_req_byteen_in  ({CCI_LINE_SIZE{1'b1}}),
+  .mem_req_byteen_in  ({CCI_DATA_SIZE{1'b1}}),
   .mem_req_data_in    (cci_mem_req_data),
   .mem_req_tag_in     (cci_mem_req_tag), 
   .mem_req_ready_in   (cci_mem_req_ready), 
@@ -473,8 +460,8 @@ assign vx_mem_req_valid_qual = vx_mem_req_valid && vx_started;
 assign vx_mem_req_ready = vx_mem_is_cout ? ~cout_q_full : vx_mem_req_ready_qual;
 
 VX_to_mem #(
-  .SRC_DATA_WIDTH (`VX_MEM_LINE_WIDTH),
-  .DST_DATA_WIDTH (LMEM_LINE_WIDTH),  
+  .SRC_DATA_WIDTH (`VX_MEM_DATA_WIDTH),
+  .DST_DATA_WIDTH (LMEM_DATA_WIDTH),  
   .SRC_ADDR_WIDTH (`VX_MEM_ADDR_WIDTH),    
   .DST_ADDR_WIDTH (LMEM_ADDR_WIDTH),
   .SRC_TAG_WIDTH  (`VX_MEM_TAG_WIDTH),
@@ -525,9 +512,11 @@ t_local_mem_data        mem_rsp_data;
 wire [AVS_REQ_TAGW:0]   mem_rsp_tag;
 wire                    mem_rsp_ready;
 
+`RESET_RELAY (mem_arb_reset);
+
 VX_mem_arb #(
   .NUM_REQS       (2),
-  .DATA_WIDTH     (LMEM_LINE_WIDTH),
+  .DATA_WIDTH     (LMEM_DATA_WIDTH),
   .ADDR_WIDTH     (LMEM_ADDR_WIDTH),
   .TAG_IN_WIDTH   (AVS_REQ_TAGW),
   .BUFFERED_REQ   (0),
@@ -535,7 +524,7 @@ VX_mem_arb #(
   .TYPE           ("X")
 ) mem_arb (
   .clk            (clk),
-  .reset          (reset),
+  .reset          (mem_arb_reset),
 
   // Source request
   .req_valid_in   ({vx_mem_req_arb_valid,  cci_mem_req_arb_valid}),
@@ -570,9 +559,10 @@ VX_mem_arb #(
 
 //--
 
+`RESET_RELAY (avs_wrapper_reset);
+
 VX_avs_wrapper #(
-  .NUM_BANKS       (NUM_LOCAL_MEM_BANKS),
-  .AVS_DATA_WIDTH  (LMEM_LINE_WIDTH), 
+  .AVS_DATA_WIDTH  (LMEM_DATA_WIDTH), 
   .AVS_ADDR_WIDTH  (LMEM_ADDR_WIDTH),
   .AVS_BURST_WIDTH (LMEM_BURST_CTRW),
   .AVS_BANKS       (NUM_LOCAL_MEM_BANKS),
@@ -580,7 +570,7 @@ VX_avs_wrapper #(
   .RD_QUEUE_SIZE   (AVS_RD_QUEUE_SIZE)
 ) avs_wrapper (
   .clk              (clk),
-  .reset            (reset),
+  .reset            (avs_wrapper_reset),
 
   // Memory request 
   .mem_req_valid    (mem_req_valid),
@@ -710,7 +700,7 @@ always @(posedge clk) begin
     cci_rd_req_addr <= cci_rd_req_addr + 1;
     cci_rd_req_ctr  <= cci_rd_req_ctr + 1;
   `ifdef DBG_PRINT_OPAE
-    $display("%t: CCI Rd Req: addr=%0h, tag=%0h, rem=%0d, pending=%0d", $time, cci_rd_req_addr, cci_rd_req_tag, (cmd_data_size - cci_rd_req_ctr - 1), cci_pending_reads);
+    dpi_trace("%d: CCI Rd Req: addr=%0h, tag=%0h, rem=%0d, pending=%0d\n", $time, cci_rd_req_addr, cci_rd_req_tag, (cmd_data_size - cci_rd_req_ctr - 1), cci_pending_reads);
   `endif
   end
 
@@ -720,13 +710,13 @@ always @(posedge clk) begin
       cci_mem_wr_req_addr_base <= cci_mem_wr_req_addr_base + CCI_ADDR_WIDTH'(CCI_RD_WINDOW_SIZE);
     end
   `ifdef DBG_PRINT_OPAE
-    $display("%t: CCI Rd Rsp: idx=%0d, ctr=%0d, data=%0h", $time, cci_rd_rsp_tag, cci_rd_rsp_ctr, cp2af_sRxPort.c0.data);
+    dpi_trace("%d: CCI Rd Rsp: idx=%0d, ctr=%0d, data=%0h\n", $time, cci_rd_rsp_tag, cci_rd_rsp_ctr, cp2af_sRxPort.c0.data);
   `endif
   end 
 
   if (cci_rdq_pop) begin
   `ifdef DBG_PRINT_OPAE
-    $display("%t: CCI Rd Queue Pop: pending=%0d", $time, cci_pending_reads);
+    dpi_trace("%d: CCI Rd Queue Pop: pending=%0d\n", $time, cci_pending_reads);
   `endif
   end
 
@@ -738,13 +728,15 @@ always @(posedge clk) begin
   end
 end
 
+`RESET_RELAY (cci_rdq_reset);
+
 VX_fifo_queue #(
-  .DATAW    (CCI_RD_QUEUE_DATAW),
-  .SIZE     (CCI_RD_QUEUE_SIZE),
-  .BUFFERED (1)
+  .DATAW      (CCI_RD_QUEUE_DATAW),
+  .SIZE       (CCI_RD_QUEUE_SIZE),
+  .OUTPUT_REG (1)
 ) cci_rd_req_queue (
   .clk      (clk),
-  .reset    (reset),
+  .reset    (cci_rdq_reset),
   .push     (cci_rdq_push),
   .pop      (cci_rdq_pop),
   .data_in  (cci_rdq_din),
@@ -865,13 +857,13 @@ begin
       cci_wr_req_done <= 1;
     end
   `ifdef DBG_PRINT_OPAE
-    $display("%t: CCI Wr Req: addr=%0h, rem=%0d, pending=%0d, data=%0h", $time, cci_wr_req_addr, (cci_wr_req_ctr - 1), cci_pending_writes, af2cp_sTxPort.c1.data);
+    dpi_trace("%d: CCI Wr Req: addr=%0h, rem=%0d, pending=%0d, data=%0h\n", $time, cci_wr_req_addr, (cci_wr_req_ctr - 1), cci_pending_writes, af2cp_sTxPort.c1.data);
   `endif
   end
 
   if (cci_wr_rsp_fire) begin 
   `ifdef DBG_PRINT_OPAE     
-    $display("%t: CCI Wr Rsp: pending=%0d", $time, cci_pending_writes);  
+    dpi_trace("%d: CCI Wr Rsp: pending=%0d\n", $time, cci_pending_writes);  
   `endif    
   end
 end
@@ -892,7 +884,7 @@ Vortex #() vortex (
   `SCOPE_BIND_afu_vortex
 
   .clk            (clk),
-  .reset          (reset | vx_reset),
+  .reset          (reset || vx_reset),
 
   // Memory request 
   .mem_req_valid  (vx_mem_req_valid),
@@ -1011,6 +1003,8 @@ VX_fifo_queue #(
 
 wire scope_changed = `SCOPE_TRIGGER;
 
+`RESET_RELAY (scope_reset);
+
 VX_scope #(
   .DATAW ($bits({`SCOPE_DATA_LIST,`SCOPE_UPDATE_LIST})),
   .BUSW  (64),
@@ -1018,7 +1012,7 @@ VX_scope #(
   .UPDW  ($bits({`SCOPE_UPDATE_LIST}))
 ) scope (
   .clk      (clk),
-  .reset    (reset),
+  .reset    (scope_reset),
   .start    (1'b0),
   .stop     (1'b0),
   .changed  (scope_changed),

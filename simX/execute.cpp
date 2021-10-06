@@ -816,12 +816,23 @@ void Warp::execute(const Instr &instr, Pipeline *pipeline) {
     case GPGPU:
       switch (func3) {
       case 0: {
-        // TMC
-        int active_threads = std::min<int>(rsdata[0], num_threads);          
-        tmask_.reset();
-        for (int i = 0; i < active_threads; ++i) {
-          tmask_[i] = true;
+        // TMC        
+        if (rsrc1) {
+          // predicate mode
+          ThreadMask pred;
+          for (int i = 0; i < num_threads; ++i) {
+            pred[i] = tmask_[i] ? (iRegFile_[i][rsrc0] != 0) : 0;
+          }
+          if (pred.any()) {
+            tmask_ &= pred;
+          }
+        } else {
+          tmask_.reset();
+          for (int i = 0; i < num_threads; ++i) {
+            tmask_[i] = rsdata[0] & (1 << i);
+          }
         }
+        D(3, "*** TMC " << tmask_);
         active_ = tmask_.any();
         pipeline->stall_warp = true;
         runOnce = true;
@@ -860,7 +871,7 @@ void Warp::execute(const Instr &instr, Pipeline *pipeline) {
           for (int i = 0; i < num_threads; ++i) DPN(3, e.tmask[num_threads-i-1]);
           DPN(3, ", PC=0x" << std::hex << e.PC << "\n");
         } else {
-          D(3, "*** Unanimous pred: r" << rsrc0 << ", val: " << rsdata[0]);
+          D(3, "*** Unanimous pred");
           DomStackEntry e(tmask_);
           e.unanimous = true;
           domStack_.push(e);

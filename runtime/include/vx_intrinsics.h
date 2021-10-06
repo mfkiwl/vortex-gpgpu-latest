@@ -53,8 +53,13 @@ extern "C" {
 })
 
 // Set thread mask
-inline void vx_tmc(unsigned num_threads) {
-    asm volatile (".insn s 0x6b, 0, x0, 0(%0)" :: "r"(num_threads));
+inline void vx_tmc(unsigned thread_mask) {
+    asm volatile (".insn s 0x6b, 0, x0, 0(%0)" :: "r"(thread_mask));
+}
+
+// Set thread predicate
+inline void vx_pred(unsigned condition) {
+    asm volatile (".insn s 0x6b, 0, x1, 0(%0)" :: "r"(condition));
 }
 
 typedef void (*vx_wspawn_pfn)();
@@ -76,7 +81,7 @@ inline void vx_join() {
 
 // Warp Barrier
 inline void vx_barrier(unsigned barried_id, unsigned num_warps) {
-    asm volatile (".insn s 0x6b, 4, %1, 0cd (%0)" :: "r"(barried_id), "r"(num_warps));
+    asm volatile (".insn s 0x6b, 4, %1, 0(%0)" :: "r"(barried_id), "r"(num_warps));
 }
 
 // Return active warp's thread id 
@@ -118,6 +123,13 @@ inline int vx_warp_gid() {
 inline int vx_core_id() {
     int result;
     asm volatile ("csrr %0, %1" : "=r"(result) : "i"(CSR_GCID));
+    return result; 
+}
+
+// Return current threadk mask
+inline int vx_thread_mask() {
+    int result;
+    asm volatile ("csrr %0, %1" : "=r"(result) : "i"(CSR_TMASK));
     return result; 
 }
 

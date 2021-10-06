@@ -8,6 +8,7 @@
 #include <cmath>
 #include <sstream>
 #include <unordered_map>
+#include <list>
 
 #if defined(USE_FPGA) || defined(USE_ASE) 
 #include <opae/fpga.h>
@@ -75,6 +76,34 @@ inline bool is_aligned(size_t addr, size_t alignment) {
     assert(0 == (alignment & (alignment - 1)));
     return 0 == (addr & (alignment - 1));
 }
+
+///////////////////////////////////////////////////////////////////////////////
+
+#ifdef DUMP_PERF_STATS
+class AutoPerfDump {
+private:
+    std::list<vx_device_h> devices_;
+
+public:
+    AutoPerfDump() {} 
+
+    ~AutoPerfDump() {
+        for (auto device : devices_) {
+            vx_dump_perf(device, stdout);
+        }
+    }
+
+    void add_device(vx_device_h device) {
+        devices_.push_back(device);
+    }
+
+    void remove_device(vx_device_h device) {
+        devices_.remove(device);
+    }    
+};
+
+AutoPerfDump gAutoPerfDump;
+#endif
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -223,6 +252,10 @@ extern int vx_dev_open(vx_device_h* hdevice) {
 
     *hdevice = device;
 
+#ifdef DUMP_PERF_STATS
+    gAutoPerfDump.add_device(*hdevice);
+#endif
+
     return 0;
 }
 
@@ -237,7 +270,8 @@ extern int vx_dev_close(vx_device_h hdevice) {
 #endif
 
 #ifdef DUMP_PERF_STATS
-    vx_dump_perf(device, stdout);
+    gAutoPerfDump.remove_device(hdevice);
+    vx_dump_perf(hdevice, stdout);
 #endif
 
     fpgaClose(device->fpga);

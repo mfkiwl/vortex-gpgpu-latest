@@ -10,6 +10,14 @@
 
 #define ENABLE_MEM_STALLS
 
+#ifndef TRACE_START_TIME
+#define TRACE_START_TIME 0ull
+#endif
+
+#ifndef TRACE_STOP_TIME
+#define TRACE_STOP_TIME -1ull
+#endif
+
 #ifndef MEM_LATENCY
 #define MEM_LATENCY 24
 #endif
@@ -26,7 +34,7 @@
 #define VERILATOR_RESET_VALUE 2
 #endif
 
-uint64_t timestamp = 0;
+static uint64_t timestamp = 0;
 
 double sc_time_stamp() { 
   return timestamp;
@@ -45,6 +53,23 @@ static void __aligned_free(void *ptr) {
   // retreive the stored unaligned address and use it to free the allocation
   void* unaligned_addr = ((void**)ptr)[-1];
   free(unaligned_addr);
+}
+
+///////////////////////////////////////////////////////////////////////////////
+
+static bool trace_enabled = false;
+static uint64_t trace_start_time = TRACE_START_TIME;
+static uint64_t trace_stop_time = TRACE_STOP_TIME;
+
+bool sim_trace_enabled() {
+  if (timestamp >= trace_start_time 
+   && timestamp < trace_stop_time)
+    return true;
+  return trace_enabled;
+}
+
+void sim_trace_enable(bool enable) {
+  trace_enabled = enable;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -88,6 +113,7 @@ opae_sim::~opae_sim() {
   }
 #ifdef VCD_OUTPUT
   trace_->close();
+  delete trace_;
 #endif  
   for (auto& buffer : host_buffers_) {
     __aligned_free(buffer.second.data);
@@ -198,7 +224,9 @@ void opae_sim::step() {
 void opae_sim::eval() {  
   vortex_afu_->eval();
 #ifdef VCD_OUTPUT
-  trace_->dump(timestamp);
+  if (sim_trace_enabled()) {
+    trace_->dump(timestamp);
+  }
 #endif
   ++timestamp;
 }
@@ -340,7 +368,7 @@ void opae_sim::avs_bus() {
         }
         /*printf("%0ld: [sim] MEM Wr Req: bank=%d, addr=%x, data=", timestamp, b, base_addr);
         for (int i = 0; i < MEM_BLOCK_SIZE; i++) {
-          printf("%0x", data[(MEM_BLOCK_SIZE-1)-i]);
+          printf("%02x", data[(MEM_BLOCK_SIZE-1)-i]);
         }
         printf("\n");*/
       }
@@ -351,6 +379,7 @@ void opae_sim::avs_bus() {
         mem_req.cycles_left = MEM_LATENCY;
         for (auto& rsp : mem_reads_[b]) {
           if (mem_req.addr == rsp.addr) {
+            // duplicate requests receive the same cycle delay
             mem_req.cycles_left = rsp.cycles_left;
             break;
           }

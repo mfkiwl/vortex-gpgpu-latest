@@ -12,11 +12,15 @@ int main() {
 
 	errors += test_tmc();
 
+	errors += test_pred();
+
 	errors += test_divergence();
 
 	errors += test_wsapwn();
 
 	errors += test_spawn_tasks();
+
+	errors += test_serial();
 
 	errors += test_tmask();
 

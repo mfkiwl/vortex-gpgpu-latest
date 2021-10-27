@@ -262,7 +262,7 @@ def expand_text(text, params):
             has_func = do_repl.has_func            
             if not (params_updated or do_repl.expanded):
                 break
-            text = new_text            
+            text = new_text    
             changed = True
         if not has_func:
             break
@@ -398,6 +398,8 @@ def eval_node(text, params):
     try:        
         __text = text.replace('$clog2', '__clog2')
         __text = translate_ternary(__text)
+        __text = __text.replace('||', 'or')
+        __text = __text.replace('&&', 'and')
         e = eval(__text, {'__clog2': clog2})
         return e
     except (NameError, SyntaxError):

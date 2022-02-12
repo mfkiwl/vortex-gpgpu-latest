@@ -1,7 +1,9 @@
 #pragma once
 
+#include <cstdint>
 #include <vector>
 #include <unordered_map>
+#include <cstdint>
 
 namespace vortex {
 struct BadAddress {};

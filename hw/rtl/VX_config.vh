@@ -14,6 +14,8 @@
 `ifndef VX_CONFIG_VH
 `define VX_CONFIG_VH
 
+
+
 `ifndef MIN
 `define MIN(x, y)   (((x) < (y)) ? (x) : (y))
 `endif
@@ -31,7 +33,6 @@
 `endif
 
 ///////////////////////////////////////////////////////////////////////////////
-
 `ifndef EXT_M_DISABLE
 `define EXT_M_ENABLE
 `endif
@@ -109,7 +110,24 @@
 `ifndef SOCKET_SIZE
 `define SOCKET_SIZE `MIN(4, `NUM_CORES)
 `endif
-`define NUM_SOCKETS `UP(`NUM_CORES / `SOCKET_SIZE)
+
+// Size of Tensor Core
+`ifndef TC_SIZE
+`define TC_SIZE 8
+`endif
+
+// Number of TCs per Warp
+`ifndef TC_NUM
+`define TC_NUM 4
+`endif
+
+`ifndef NUM_TCU_LANES
+`define NUM_TCU_LANES   `TC_NUM
+`endif
+
+`ifndef NUM_TCU_BLOCKS
+`define NUM_TCU_BLOCKS  `ISSUE_WIDTH
+`endif
 
 `ifdef L2_ENABLE
     `define L2_ENABLED   1
@@ -170,7 +188,14 @@
 `define IO_BASE_ADDR    64'h000000040
 `endif
 
-`else
+`ifdef VM_ENABLE
+`ifndef PAGE_TABLE_BASE_ADDR  
+`define PAGE_TABLE_BASE_ADDR 64'h0F0000000
+`endif
+
+`endif
+
+`else // XLEN_32
 
 `ifndef STACK_BASE_ADDR
 `define STACK_BASE_ADDR 32'hFFFF0000
@@ -186,6 +211,13 @@
 
 `ifndef IO_BASE_ADDR
 `define IO_BASE_ADDR    32'h00000040
+`endif
+
+`ifdef VM_ENABLE
+`ifndef PAGE_TABLE_BASE_ADDR  
+`define PAGE_TABLE_BASE_ADDR 32'hF0000000
+`endif
+
 `endif
 
 `endif
@@ -215,14 +247,16 @@
 `endif
 `define STACK_SIZE      (1 << `STACK_LOG2_SIZE)
 
-`define RESET_DELAY 8
+`define RESET_DELAY     8
 
 `ifndef STALL_TIMEOUT
 `define STALL_TIMEOUT   (100000 * (1 ** (`L2_ENABLED + `L3_ENABLED)))
 `endif
 
 `ifndef SV_DPI
+`ifndef DPI_DISABLE
 `define DPI_DISABLE
+`endif
 `endif
 
 `ifndef FPU_FPNEW
@@ -250,6 +284,59 @@
 
 `ifndef DEBUG_LEVEL
 `define DEBUG_LEVEL 3
+`endif
+
+`ifndef MEM_PAGE_SIZE
+`define MEM_PAGE_SIZE (4096)
+`endif
+`ifndef MEM_PAGE_LOG2_SIZE
+`define MEM_PAGE_LOG2_SIZE (12)
+`endif
+
+// Virtual Memory Configuration ///////////////////////////////////////////////////////
+`ifdef VM_ENABLE
+    `ifdef XLEN_32
+        `ifndef VM_ADDR_MODE
+        `define VM_ADDR_MODE SV32  //or BARE
+        `endif
+        `ifndef PT_LEVEL 
+        `define PT_LEVEL (2)
+        `endif
+        `ifndef PTE_SIZE
+        `define PTE_SIZE (4)
+        `endif
+        `ifndef NUM_PTE_ENTRY 
+        `define NUM_PTE_ENTRY (1024)
+        `endif
+        `ifndef PT_SIZE_LIMIT
+        `define PT_SIZE_LIMIT (1<<23)
+        `endif
+    `else
+        `ifndef VM_ADDR_MODE
+        `define VM_ADDR_MODE SV39 //or BARE
+        `endif
+        `ifndef PT_LEVEL 
+        `define PT_LEVEL (3)
+        `endif
+        `ifndef PTE_SIZE
+        `define PTE_SIZE (8)
+        `endif
+        `ifndef NUM_PTE_ENTRY 
+        `define NUM_PTE_ENTRY (512)
+        `endif
+        `ifndef PT_SIZE_LIMIT
+        `define PT_SIZE_LIMIT (1<<25)
+        `endif
+    `endif
+
+    `ifndef PT_SIZE
+    `define PT_SIZE MEM_PAGE_SIZE
+    `endif
+
+    `ifndef TLB_SIZE
+    `define TLB_SIZE (32)
+    `endif
+
 `endif
 
 // Pipeline Configuration /////////////////////////////////////////////////////
@@ -285,7 +372,7 @@
 
 // Number of SFU units
 `ifndef NUM_SFU_LANES
-`define NUM_SFU_LANES   `MIN(`NUM_THREADS, 4)
+`define NUM_SFU_LANES   `NUM_THREADS
 `endif
 `ifndef NUM_SFU_BLOCKS
 `define NUM_SFU_BLOCKS  1
@@ -409,22 +496,27 @@
 `define LATENCY_FCVT 5
 `endif
 
+// FMA Bandwidth ratio
 `ifndef FMA_PE_RATIO
 `define FMA_PE_RATIO 1
 `endif
 
+// FDIV Bandwidth ratio
 `ifndef FDIV_PE_RATIO
 `define FDIV_PE_RATIO 8
 `endif
 
+// FSQRT Bandwidth ratio
 `ifndef FSQRT_PE_RATIO
 `define FSQRT_PE_RATIO 8
 `endif
 
+// FCVT Bandwidth ratio
 `ifndef FCVT_PE_RATIO
 `define FCVT_PE_RATIO 8
 `endif
 
+// FNCP Bandwidth ratio
 `ifndef FNCP_PE_RATIO
 `define FNCP_PE_RATIO 2
 `endif
@@ -531,7 +623,12 @@
 `define DCACHE_NUM_WAYS 1
 `endif
 
-// SM Configurable Knobs //////////////////////////////////////////////////////
+// Enable Cache Writeback
+`ifndef DCACHE_WRITEBACK
+`define DCACHE_WRITEBACK 0
+`endif
+
+// LMEM Configurable Knobs ////////////////////////////////////////////////////
 
 `ifndef LMEM_DISABLE
 `define LMEM_ENABLE
@@ -590,6 +687,11 @@
 `define L2_NUM_WAYS 2
 `endif
 
+// Enable Cache Writeback
+`ifndef L2_WRITEBACK
+`define L2_WRITEBACK 0
+`endif
+
 // L3cache Configurable Knobs /////////////////////////////////////////////////
 
 // Cache Size
@@ -603,7 +705,7 @@
 
 // Number of Banks
 `ifndef L3_NUM_BANKS
-`define L3_NUM_BANKS `MIN(4, `NUM_CLUSTERS)
+`define L3_NUM_BANKS `MIN(8, `NUM_CLUSTERS)
 `endif
 
 // Core Response Queue Size
@@ -629,6 +731,20 @@
 // Number of Associative Ways
 `ifndef L3_NUM_WAYS
 `define L3_NUM_WAYS 4
+`endif
+
+// Enable Cache Writeback
+`ifndef L3_WRITEBACK
+`define L3_WRITEBACK 0
+`endif
+
+`ifndef MEMORY_BANKS
+`define MEMORY_BANKS 2
+`endif
+
+// Number of Memory Ports from LLC
+`ifndef NUM_MEM_PORTS
+`define NUM_MEM_PORTS `MIN(`MEMORY_BANKS, `L3_NUM_BANKS)
 `endif
 
 // ISA Extensions /////////////////////////////////////////////////////////////

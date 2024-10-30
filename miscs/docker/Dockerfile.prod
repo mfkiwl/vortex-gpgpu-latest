@@ -1,0 +1,66 @@
+# Copyright © 2019-2023
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Use Ubuntu 20.04 as the base image
+FROM ubuntu:20.04
+
+# Set non-interactive installation to avoid user input during build
+ARG DEBIAN_FRONTEND=noninteractive
+
+# Install necessary dependencies and upgrade installed components
+RUN apt-get update -y && \
+    apt-get install -y \
+    software-properties-common \
+    build-essential \
+    python3 \
+    git \
+    wget \
+    curl \
+    ca-certificates \
+    valgrind \
+    libstdc++6 \
+    binutils \
+    uuid-dev \
+    ccache \
+    cmake && \
+    apt-get upgrade -y && \
+    gcc_version=$(gcc -dumpversion) && \
+    if dpkg --compare-versions "$gcc_version" lt 11; then \
+        echo "GCC version is less than 11. Installing GCC 11..." && \
+        add-apt-repository -y ppa:ubuntu-toolchain-r/test && \
+        apt-get update -y && \
+        apt-get install -y g++-11 gcc-11 && \
+        update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-11 100 && \
+        update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 100; \
+    else \
+        echo "GCC version is 11 or greater. No need to install GCC 11."; \
+    fi && \
+    rm -rf /var/lib/apt/lists/*
+
+# Clone the Vortex repository
+RUN git clone --depth=1 --recursive https://github.com/vortexgpgpu/vortex.git /vortex
+
+# Set the initial working directory
+WORKDIR /vortex
+
+# Configure the build folder
+RUN mkdir build && cd build && ../configure
+
+# Install prebuilt toolchain
+RUN cd build && ./ci/toolchain_install.sh --all
+
+# Source tools environment variables and add to bashrc
+RUN echo "source /vortex/build/ci/toolchain_env.sh" >> ~/.bashrc
+
+# Set the working directory to /vortex/build
+WORKDIR /vortex/build

@@ -21,8 +21,11 @@
 #include <util.h>
 #include <stringutil.h>
 #include <VX_config.h>
+#include <VX_types.h>
 #include <simobject.h>
+#include <bitvector.h>
 #include "debug.h"
+#include <iostream>
 
 namespace vortex {
 
@@ -47,6 +50,7 @@ typedef uint64_t WordF;
 #define MAX_NUM_THREADS 32
 #define MAX_NUM_WARPS   32
 #define MAX_NUM_REGS    32
+#define NUM_SRC_REGS    3
 
 typedef std::bitset<MAX_NUM_CORES>   CoreMask;
 typedef std::bitset<MAX_NUM_REGS>    RegMask;
@@ -55,10 +59,32 @@ typedef std::bitset<MAX_NUM_WARPS>   WarpMask;
 
 ///////////////////////////////////////////////////////////////////////////////
 
+class ThreadMaskOS {
+public:
+  ThreadMaskOS(const ThreadMask& mask, int size)
+    : mask_(mask)
+    , size_(size)
+  {}
+
+  friend std::ostream& operator<<(std::ostream& os, const ThreadMaskOS& wrapper) {
+    for (int i = 0; i < wrapper.size_; ++i) {
+      os << wrapper.mask_[i];
+    }
+    return os;
+  }
+
+private:
+  const ThreadMask& mask_;
+  int size_;
+};
+
+///////////////////////////////////////////////////////////////////////////////
+
 enum class RegType {
   None,
   Integer,
-  Float
+  Float,
+  Count
 };
 
 inline std::ostream &operator<<(std::ostream &os, const RegType& type) {
@@ -78,6 +104,7 @@ enum class FUType {
   LSU,
   FPU,
   SFU,
+  TCU,
   Count
 };
 
@@ -87,6 +114,7 @@ inline std::ostream &operator<<(std::ostream &os, const FUType& type) {
   case FUType::LSU: os << "LSU"; break;
   case FUType::FPU: os << "FPU"; break;
   case FUType::SFU: os << "SFU"; break;
+  case FUType::TCU: os << "TCU"; break;
   default: assert(false);
   }
   return os;
@@ -118,14 +146,30 @@ inline std::ostream &operator<<(std::ostream &os, const AluType& type) {
 
 enum class LsuType {
   LOAD,
+  TCU_LOAD,
   STORE,
+  TCU_STORE,
   FENCE
 };
+
+enum class TCUType {
+  TCU_MUL
+};
+
+inline std::ostream &operator<<(std::ostream &os, const TCUType& type) {
+  switch (type) {
+  case TCUType::TCU_MUL: os << "TCU MUL"; break;
+  default: assert(false);
+  }
+  return os;
+}
 
 inline std::ostream &operator<<(std::ostream &os, const LsuType& type) {
   switch (type) {
   case LsuType::LOAD:  os << "LOAD"; break;
+  case LsuType::TCU_LOAD: os << "TCU_LOAD"; break;
   case LsuType::STORE: os << "STORE"; break;
+  case LsuType::TCU_STORE: os << "TCU_STORE"; break;
   case LsuType::FENCE: os << "FENCE"; break;
   default: assert(false);
   }
@@ -235,6 +279,63 @@ inline std::ostream &operator<<(std::ostream &os, const ArbiterType& type) {
   default: assert(false);
   }
   return os;
+}///////////////////////////////////////////////////////////////////////////////
+
+struct LsuReq {
+  BitVector<> mask;
+  std::vector<uint64_t> addrs;
+  bool     write;
+  uint32_t tag;
+  uint32_t cid;
+  uint64_t uuid;
+
+  LsuReq(uint32_t size)
+    : mask(size)
+    , addrs(size, 0)
+    , write(false)
+    , tag(0)
+    , cid(0)
+    , uuid(0)
+  {}
+};
+
+inline std::ostream &operator<<(std::ostream &os, const LsuReq& req) {
+  os << "rw=" << req.write << ", mask=" << req.mask << ", addr={";
+  bool first_addr = true;
+  for (size_t i = 0; i < req.mask.size(); ++i) {
+    if (!first_addr) os << ", ";
+    first_addr = false;
+    if (req.mask.test(i)) {
+      os << "0x" << std::hex << req.addrs.at(i) << std::dec;
+    } else {
+      os << "-";
+    }
+  }
+  os << "}, tag=0x" << std::hex << req.tag << std::dec << ", cid=" << req.cid;
+  os << " (#" << req.uuid << ")";
+  return os;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+
+struct LsuRsp {
+  BitVector<> mask;
+  uint64_t tag;
+  uint32_t cid;
+  uint64_t uuid;
+
+ LsuRsp(uint32_t size)
+    : mask(size)
+    , tag (0)
+    , cid(0)
+    , uuid(0)
+  {}
+};
+
+inline std::ostream &operator<<(std::ostream &os, const LsuRsp& rsp) {
+  os << "mask=" << rsp.mask << ", tag=0x" << std::hex << rsp.tag << std::dec << ", cid=" << rsp.cid;
+  os << " (#" << rsp.uuid << ")";
+  return os;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -263,10 +364,10 @@ struct MemReq {
 };
 
 inline std::ostream &operator<<(std::ostream &os, const MemReq& req) {
-  os << "mem-" << (req.write ? "wr" : "rd") << ": ";
-  os << "addr=0x" << std::hex << req.addr << ", type=" << req.type;
-  os << std::dec << ", tag=" << req.tag << ", cid=" << req.cid;
-  os << " (#" << std::dec << req.uuid << ")";
+  os << "rw=" << req.write << ", ";
+  os << "addr=0x" << std::hex << req.addr << std::dec << ", type=" << req.type;
+  os << ", tag=0x" << std::hex << req.tag << std::dec << ", cid=" << req.cid;
+  os << " (#" << req.uuid << ")";
   return os;
 }
 
@@ -285,8 +386,8 @@ struct MemRsp {
 };
 
 inline std::ostream &operator<<(std::ostream &os, const MemRsp& rsp) {
-  os << "mem-rsp: tag=" << rsp.tag << ", cid=" << rsp.cid;
-  os << " (#" << std::dec << rsp.uuid << ")";
+  os << "tag=0x" << std::hex << rsp.tag << std::dec << ", cid=" << rsp.cid;
+  os << " (#" << rsp.uuid << ")";
   return os;
 }
 
@@ -383,7 +484,7 @@ public:
     , type_(type)
     , delay_(delay)
     , cursors_(num_outputs, 0)
-    , num_reqs_(num_inputs / num_outputs)
+    , num_reqs_(log2ceil(num_inputs / num_outputs))
   {
     assert(delay != 0);
     assert(num_inputs <= 32);
@@ -407,7 +508,7 @@ public:
   void tick() {
     uint32_t I = Inputs.size();
     uint32_t O = Outputs.size();
-    uint32_t R = num_reqs_;
+    uint32_t R = 1 << num_reqs_;
 
     // skip bypass mode
     if (I == O)
@@ -424,7 +525,6 @@ public:
         auto& req_in = Inputs.at(j);
         if (!req_in.empty()) {
           auto& req = req_in.front();
-          DT(4, this->name() << "-" << req);
           Outputs.at(o).push(req, delay_);
           req_in.pop();
           this->update_cursor(o, i);
@@ -515,7 +615,7 @@ public:
           i = rsp.tag & (R-1);
           rsp.tag >>= lg_num_reqs_;
         }
-        DT(4, this->name() << "-" << rsp);
+        DT(4, this->name() << " rsp" << o << ": " << rsp);
         uint32_t j = o * R + i;
         RspIn.at(j).push(rsp, 1);
         RspOut.at(o).pop();
@@ -534,7 +634,7 @@ public:
           if (lg_num_reqs_ != 0) {
             req.tag = (req.tag << lg_num_reqs_) | i;
           }
-          DT(4, this->name() << "-" << req);
+          DT(4, this->name() << " req" << j << ": " << req);
           ReqOut.at(o).push(req, delay_);
           req_in.pop();
           this->update_cursor(o, i);
@@ -563,18 +663,43 @@ using MemSwitch = Switch<MemReq, MemRsp>;
 
 class LocalMemDemux : public SimObject<LocalMemDemux> {
 public:
-  SimPort<MemReq> ReqIn;
-  SimPort<MemRsp> RspIn;
+  SimPort<LsuReq> ReqIn;
+  SimPort<LsuRsp> RspIn;
 
-  SimPort<MemReq> ReqSM;
-  SimPort<MemRsp> RspSM;
+  SimPort<LsuReq> ReqLmem;
+  SimPort<LsuRsp> RspLmem;
 
-  SimPort<MemReq> ReqDC;
-  SimPort<MemRsp> RspDC;
+  SimPort<LsuReq> ReqDC;
+  SimPort<LsuRsp> RspDC;
 
   LocalMemDemux(
     const SimContext& ctx,
     const char* name,
+    uint32_t delay
+  );
+
+  void reset();
+
+  void tick();
+
+private:
+  uint32_t delay_;
+};
+
+///////////////////////////////////////////////////////////////////////////////
+
+class LsuMemAdapter : public SimObject<LsuMemAdapter> {
+public:
+  SimPort<LsuReq> ReqIn;
+  SimPort<LsuRsp> RspIn;
+
+  std::vector<SimPort<MemReq>> ReqOut;
+  std::vector<SimPort<MemRsp>> RspOut;
+
+  LsuMemAdapter(
+    const SimContext& ctx,
+    const char* name,
+    uint32_t num_inputs,
     uint32_t delay
   );
 

@@ -173,7 +173,7 @@
 `endif
 
 `ifndef PLATFORM_MEMORY_BANKS
-`define PLATFORM_MEMORY_BANKS 1
+`define PLATFORM_MEMORY_BANKS 2
 `endif
 
 `ifdef XLEN_64
@@ -241,7 +241,7 @@
 `ifndef IO_COUT_ADDR
 `define IO_COUT_ADDR    `IO_BASE_ADDR
 `endif
-`define IO_COUT_SIZE    `MEM_BLOCK_SIZE
+`define IO_COUT_SIZE    64
 
 `ifndef IO_MPM_ADDR
 `define IO_MPM_ADDR     (`IO_COUT_ADDR + `IO_COUT_SIZE)
@@ -580,6 +580,10 @@
 `define ICACHE_REPL_POLICY 1
 `endif
 
+`ifndef ICACHE_MEM_PORTS
+`define ICACHE_MEM_PORTS 1
+`endif
+
 // Dcache Configurable Knobs //////////////////////////////////////////////////
 
 // Cache Enable
@@ -830,6 +834,12 @@
     `define EXT_M_ENABLED   0
 `endif
 
+`ifdef EXT_V_ENABLE
+    `define EXT_V_ENABLED   1
+`else
+    `define EXT_V_ENABLED   0
+`endif
+
 `ifdef EXT_ZICOND_ENABLE
     `define EXT_ZICOND_ENABLED 1
 `else
@@ -846,7 +856,7 @@
 `define ISA_STD_N           13
 `define ISA_STD_Q           16
 `define ISA_STD_S           18
-`define ISA_STD_U           20
+`define ISA_STD_V           21
 
 `define ISA_EXT_ICACHE      0
 `define ISA_EXT_DCACHE      1
@@ -883,7 +893,7 @@
                 | (0 << 18) /* S - Supervisor mode implemented */ \
                 | (0 << 19) /* T - Tentatively reserved for Transactional Memory extension */ \
                 | (1 << 20) /* U - User mode implemented */ \
-                | (0 << 21) /* V - Tentatively reserved for Vector extension */ \
+                | (`EXT_V_ENABLED << 21) /* V - Tentatively reserved for Vector extension */ \
                 | (0 << 22) /* W - Reserved */ \
                 | (1 << 23) /* X - Non-standard extensions present */ \
                 | (0 << 24) /* Y - Reserved */ \

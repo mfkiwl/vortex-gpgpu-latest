@@ -10,16 +10,22 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+//
+// Reference: https://www.xilinx.com/developer/articles/porting-rtl-designs-to-vitis-rtl-kernels.html
 
 `include "vortex_afu.vh"
 
 module VX_afu_wrap #(
-	  parameter C_S_AXI_CTRL_ADDR_WIDTH = 8,
-	  parameter C_S_AXI_CTRL_DATA_WIDTH	= 32,
-	  parameter C_M_AXI_MEM_ID_WIDTH    = 32,
-	  parameter C_M_AXI_MEM_DATA_WIDTH  = 512,
-	  parameter C_M_AXI_MEM_ADDR_WIDTH  = 25,
-      parameter C_M_AXI_MEM_NUM_BANKS   = 2
+	parameter C_S_AXI_CTRL_ADDR_WIDTH = 8,
+	parameter C_S_AXI_CTRL_DATA_WIDTH = 32,
+	parameter C_M_AXI_MEM_ID_WIDTH    = `PLATFORM_MEMORY_ID_WIDTH,
+	parameter C_M_AXI_MEM_DATA_WIDTH  = `PLATFORM_MEMORY_DATA_SIZE * 8,
+	parameter C_M_AXI_MEM_ADDR_WIDTH  = 64,
+`ifdef PLATFORM_MERGED_MEMORY_INTERFACE
+	parameter C_M_AXI_MEM_NUM_BANKS   = 1
+`else
+	parameter C_M_AXI_MEM_NUM_BANKS   = `PLATFORM_MEMORY_NUM_BANKS
+`endif
 ) (
     // System signals
     input wire clk,
@@ -29,60 +35,68 @@ module VX_afu_wrap #(
 `ifdef PLATFORM_MERGED_MEMORY_INTERFACE
 	`REPEAT (1, GEN_AXI_MEM, REPEAT_COMMA),
 `else
-	`REPEAT (`PLATFORM_MEMORY_BANKS, GEN_AXI_MEM, REPEAT_COMMA),
+	`REPEAT (`PLATFORM_MEMORY_NUM_BANKS, GEN_AXI_MEM, REPEAT_COMMA),
 `endif
     // AXI4-Lite slave interface
     input  wire                                 s_axi_ctrl_awvalid,
     output wire                                 s_axi_ctrl_awready,
     input  wire [C_S_AXI_CTRL_ADDR_WIDTH-1:0]   s_axi_ctrl_awaddr,
+
     input  wire                                 s_axi_ctrl_wvalid,
     output wire                                 s_axi_ctrl_wready,
     input  wire [C_S_AXI_CTRL_DATA_WIDTH-1:0]   s_axi_ctrl_wdata,
     input  wire [C_S_AXI_CTRL_DATA_WIDTH/8-1:0] s_axi_ctrl_wstrb,
+
     input  wire                                 s_axi_ctrl_arvalid,
     output wire                                 s_axi_ctrl_arready,
     input  wire [C_S_AXI_CTRL_ADDR_WIDTH-1:0]   s_axi_ctrl_araddr,
+
     output wire                                 s_axi_ctrl_rvalid,
     input  wire                                 s_axi_ctrl_rready,
     output wire [C_S_AXI_CTRL_DATA_WIDTH-1:0]   s_axi_ctrl_rdata,
     output wire [1:0]                           s_axi_ctrl_rresp,
+
     output wire                                 s_axi_ctrl_bvalid,
     input  wire                                 s_axi_ctrl_bready,
     output wire [1:0]                           s_axi_ctrl_bresp,
 
     output wire                                 interrupt
 );
-`ifdef PLATFORM_MERGED_MEMORY_INTERFACE
-	localparam M_AXI_MEM_ADDR_WIDTH = `PLATFORM_MEMORY_ADDR_WIDTH + $clog2(`PLATFORM_MEMORY_BANKS);
-`else
 	localparam M_AXI_MEM_ADDR_WIDTH = `PLATFORM_MEMORY_ADDR_WIDTH;
-`endif
 
-	localparam STATE_IDLE = 0;
-    localparam STATE_RUN  = 1;
+	typedef enum logic [1:0] {
+		STATE_IDLE = 0,
+		STATE_INIT = 1,
+    	STATE_RUN  = 2,
+		STATE_DONE = 3
+	} state_e;
 
-	localparam PENDING_SIZEW = 12; // max outstanding requests size
-	localparam C_M_AXI_MEM_NUM_BANKS_SW = `CLOG2(C_M_AXI_MEM_NUM_BANKS+1);
+	localparam PENDING_WR_SIZEW    = 12; // max outstanding requests size
+	localparam NUM_MEM_BANKS_SIZEW = `CLOG2(C_M_AXI_MEM_NUM_BANKS+1);
 
 	wire                                 m_axi_mem_awvalid_a [C_M_AXI_MEM_NUM_BANKS];
     wire                                 m_axi_mem_awready_a [C_M_AXI_MEM_NUM_BANKS];
     wire [C_M_AXI_MEM_ADDR_WIDTH-1:0]    m_axi_mem_awaddr_a [C_M_AXI_MEM_NUM_BANKS];
     wire [C_M_AXI_MEM_ID_WIDTH-1:0]      m_axi_mem_awid_a [C_M_AXI_MEM_NUM_BANKS];
     wire [7:0]                           m_axi_mem_awlen_a [C_M_AXI_MEM_NUM_BANKS];
+
     wire                                 m_axi_mem_wvalid_a [C_M_AXI_MEM_NUM_BANKS];
     wire                                 m_axi_mem_wready_a [C_M_AXI_MEM_NUM_BANKS];
     wire [C_M_AXI_MEM_DATA_WIDTH-1:0]    m_axi_mem_wdata_a [C_M_AXI_MEM_NUM_BANKS];
     wire [C_M_AXI_MEM_DATA_WIDTH/8-1:0]  m_axi_mem_wstrb_a [C_M_AXI_MEM_NUM_BANKS];
     wire                                 m_axi_mem_wlast_a [C_M_AXI_MEM_NUM_BANKS];
+
     wire                                 m_axi_mem_bvalid_a [C_M_AXI_MEM_NUM_BANKS];
     wire                                 m_axi_mem_bready_a [C_M_AXI_MEM_NUM_BANKS];
     wire [C_M_AXI_MEM_ID_WIDTH-1:0]      m_axi_mem_bid_a [C_M_AXI_MEM_NUM_BANKS];
     wire [1:0]                           m_axi_mem_bresp_a [C_M_AXI_MEM_NUM_BANKS];
+
     wire                                 m_axi_mem_arvalid_a [C_M_AXI_MEM_NUM_BANKS];
     wire                                 m_axi_mem_arready_a [C_M_AXI_MEM_NUM_BANKS];
     wire [C_M_AXI_MEM_ADDR_WIDTH-1:0]    m_axi_mem_araddr_a [C_M_AXI_MEM_NUM_BANKS];
     wire [C_M_AXI_MEM_ID_WIDTH-1:0]      m_axi_mem_arid_a [C_M_AXI_MEM_NUM_BANKS];
     wire [7:0]                           m_axi_mem_arlen_a [C_M_AXI_MEM_NUM_BANKS];
+
     wire                                 m_axi_mem_rvalid_a [C_M_AXI_MEM_NUM_BANKS];
     wire                                 m_axi_mem_rready_a [C_M_AXI_MEM_NUM_BANKS];
     wire [C_M_AXI_MEM_DATA_WIDTH-1:0]    m_axi_mem_rdata_a [C_M_AXI_MEM_NUM_BANKS];
@@ -94,12 +108,11 @@ module VX_afu_wrap #(
 `ifdef PLATFORM_MERGED_MEMORY_INTERFACE
 	`REPEAT (1, AXI_MEM_TO_ARRAY, REPEAT_SEMICOLON);
 `else
-	`REPEAT (`PLATFORM_MEMORY_BANKS, AXI_MEM_TO_ARRAY, REPEAT_SEMICOLON);
+	`REPEAT (`PLATFORM_MEMORY_NUM_BANKS, AXI_MEM_TO_ARRAY, REPEAT_SEMICOLON);
 `endif
 
 	reg [`CLOG2(`RESET_DELAY+1)-1:0] vx_reset_ctr;
-	reg [PENDING_SIZEW-1:0] vx_pending_writes;
-	reg vx_busy_wait;
+	reg [PENDING_WR_SIZEW-1:0] vx_pending_writes;
 	reg vx_reset = 1; // asserted at initialization
 	wire vx_busy;
 
@@ -107,13 +120,16 @@ module VX_afu_wrap #(
 	wire [`VX_DCR_ADDR_WIDTH-1:0] dcr_wr_addr;
 	wire [`VX_DCR_DATA_WIDTH-1:0] dcr_wr_data;
 
-	reg state;
+	state_e state;
 
 	wire ap_reset;
 	wire ap_start;
-	wire ap_idle  = vx_reset;
-	wire ap_done  = (state == STATE_IDLE) && (vx_pending_writes == '0);
-	wire ap_ready = 1'b1;
+	wire ap_ctrl_read;
+	wire ap_idle  = (state == STATE_IDLE);
+	wire ap_done  = (state == STATE_DONE) && (vx_pending_writes == '0);
+	wire ap_ready = ap_done;
+
+	wire ap_done_ack = ap_done && ap_ctrl_read;
 
 `ifdef SCOPE
 	wire scope_bus_in;
@@ -130,39 +146,48 @@ module VX_afu_wrap #(
 			STATE_IDLE: begin
 				if (ap_start) begin
 				`ifdef DBG_TRACE_AFU
-					`TRACE(2, ("%t: AFU: Goto STATE RUN\n", $time))
+					`TRACE(2, ("%t: AFU: Begin initialization\n", $time))
 				`endif
-					state <= STATE_RUN;
+					state <= STATE_INIT;
 					vx_reset_ctr <= (`RESET_DELAY-1);
 					vx_reset <= 1;
 				end
 			end
-			STATE_RUN: begin
+			STATE_INIT: begin
 				if (vx_reset) begin
-					// wait until the reset network is ready
+					// wait for reset to complete
 					if (vx_reset_ctr == 0) begin
 					`ifdef DBG_TRACE_AFU
-						`TRACE(2, ("%t: AFU: Begin execution\n", $time))
+						`TRACE(2, ("%t: AFU: Initialization completed\n", $time))
 					`endif
-						vx_busy_wait <= 1;
 						vx_reset <= 0;
 					end
 				end else begin
-					if (vx_busy_wait) begin
-						// wait until processor goes busy
-						if (vx_busy) begin
-							vx_busy_wait <= 0;
-						end
-					end else begin
-						// wait until the processor is not busy
-						if (~vx_busy) begin
-						`ifdef DBG_TRACE_AFU
-							`TRACE(2, ("%t: AFU: End execution\n", $time))
-                            `TRACE(2, ("%t: AFU: Goto STATE IDLE\n", $time))
-						`endif
-							state <= STATE_IDLE;
-						end
+					// wait until processor goes busy
+					if (vx_busy) begin
+					`ifdef DBG_TRACE_AFU
+						`TRACE(2, ("%t: AFU: Begin execution\n", $time))
+					`endif
+						state <= STATE_RUN;
 					end
+				end
+			end
+			STATE_RUN: begin
+				// wait until the processor is not busy
+				if (~vx_busy) begin
+				`ifdef DBG_TRACE_AFU
+					`TRACE(2, ("%t: AFU: Execution completed\n", $time))
+				`endif
+					state <= STATE_DONE;
+				end
+			end
+			STATE_DONE: begin
+				// wait for host's done acknowledgement
+				if (ap_done_ack) begin
+				`ifdef DBG_TRACE_AFU
+					`TRACE(2, ("%t: AFU: Processor idle\n", $time))
+				`endif
+					state <= STATE_IDLE;
 				end
 			end
 			endcase
@@ -175,9 +200,9 @@ module VX_afu_wrap #(
 	end
 
 	wire [C_M_AXI_MEM_NUM_BANKS-1:0] m_axi_wr_req_fire, m_axi_wr_rsp_fire;
-	wire [C_M_AXI_MEM_NUM_BANKS_SW-1:0] cur_wr_reqs, cur_wr_rsps;
+	wire [NUM_MEM_BANKS_SIZEW-1:0] cur_wr_reqs, cur_wr_rsps;
 
-	for (genvar i = 0; i < C_M_AXI_MEM_NUM_BANKS; ++i) begin : g_awfire
+	for (genvar i = 0; i < C_M_AXI_MEM_NUM_BANKS; ++i) begin : g_m_axi_wr_req_fire
 		VX_axi_write_ack axi_write_ack (
             .clk    (clk),
             .reset  (reset),
@@ -190,20 +215,23 @@ module VX_afu_wrap #(
 			`UNUSED_PIN (w_ack),
 			`UNUSED_PIN (tx_rdy)
         );
-		assign m_axi_wr_rsp_fire[i] = m_axi_mem_bvalid_a[i] & m_axi_mem_bready_a[i];
+	end
+
+	for (genvar i = 0; i < C_M_AXI_MEM_NUM_BANKS; ++i) begin : g_m_axi_wr_rsp_fire
+		assign m_axi_wr_rsp_fire[i] = m_axi_mem_bvalid_a[i] && m_axi_mem_bready_a[i];
 	end
 
 	`POP_COUNT(cur_wr_reqs, m_axi_wr_req_fire);
 	`POP_COUNT(cur_wr_rsps, m_axi_wr_rsp_fire);
 
-	wire signed [C_M_AXI_MEM_NUM_BANKS_SW:0] reqs_sub = (C_M_AXI_MEM_NUM_BANKS_SW+1)'(cur_wr_reqs) -
-	                                                     (C_M_AXI_MEM_NUM_BANKS_SW+1)'(cur_wr_rsps);
+	wire signed [NUM_MEM_BANKS_SIZEW:0] reqs_sub = (NUM_MEM_BANKS_SIZEW+1)'(cur_wr_reqs) -
+	                                                     (NUM_MEM_BANKS_SIZEW+1)'(cur_wr_rsps);
 
 	always @(posedge clk) begin
 		if (reset) begin
 			vx_pending_writes <= '0;
 		end else begin
-			vx_pending_writes <= vx_pending_writes + PENDING_SIZEW'(reqs_sub);
+			vx_pending_writes <= vx_pending_writes + PENDING_WR_SIZEW'(reqs_sub);
 		end
 	end
 
@@ -217,17 +245,21 @@ module VX_afu_wrap #(
 		.s_axi_awvalid  (s_axi_ctrl_awvalid),
 		.s_axi_awready  (s_axi_ctrl_awready),
 		.s_axi_awaddr   (s_axi_ctrl_awaddr),
+
 		.s_axi_wvalid   (s_axi_ctrl_wvalid),
 		.s_axi_wready   (s_axi_ctrl_wready),
 		.s_axi_wdata    (s_axi_ctrl_wdata),
 		.s_axi_wstrb    (s_axi_ctrl_wstrb),
+
 		.s_axi_arvalid  (s_axi_ctrl_arvalid),
 		.s_axi_arready  (s_axi_ctrl_arready),
 		.s_axi_araddr   (s_axi_ctrl_araddr),
+
 		.s_axi_rvalid   (s_axi_ctrl_rvalid),
 		.s_axi_rready   (s_axi_ctrl_rready),
 		.s_axi_rdata    (s_axi_ctrl_rdata),
 		.s_axi_rresp    (s_axi_ctrl_rresp),
+
 		.s_axi_bvalid   (s_axi_ctrl_bvalid),
 		.s_axi_bready   (s_axi_ctrl_bready),
 		.s_axi_bresp    (s_axi_ctrl_bresp),
@@ -238,6 +270,8 @@ module VX_afu_wrap #(
 		.ap_ready       (ap_ready),
 		.ap_idle     	(ap_idle),
 		.interrupt 		(interrupt),
+
+		.ap_ctrl_read   (ap_ctrl_read),
 
 	`ifdef SCOPE
 		.scope_bus_in   (scope_bus_out),
@@ -253,9 +287,8 @@ module VX_afu_wrap #(
 	wire [M_AXI_MEM_ADDR_WIDTH-1:0] m_axi_mem_araddr_u [C_M_AXI_MEM_NUM_BANKS];
 
 	for (genvar i = 0; i < C_M_AXI_MEM_NUM_BANKS; ++i) begin : g_addressing
-		localparam [C_M_AXI_MEM_ADDR_WIDTH-1:0] BANK_OFFSET = C_M_AXI_MEM_ADDR_WIDTH'(`PLATFORM_MEMORY_OFFSET) + C_M_AXI_MEM_ADDR_WIDTH'(i) << M_AXI_MEM_ADDR_WIDTH;
-		assign m_axi_mem_awaddr_a[i] = C_M_AXI_MEM_ADDR_WIDTH'(m_axi_mem_awaddr_u[i]) + BANK_OFFSET;
-		assign m_axi_mem_araddr_a[i] = C_M_AXI_MEM_ADDR_WIDTH'(m_axi_mem_araddr_u[i]) + BANK_OFFSET;
+		assign m_axi_mem_awaddr_a[i] = C_M_AXI_MEM_ADDR_WIDTH'(m_axi_mem_awaddr_u[i]) + C_M_AXI_MEM_ADDR_WIDTH'(`PLATFORM_MEMORY_OFFSET);
+		assign m_axi_mem_araddr_a[i] = C_M_AXI_MEM_ADDR_WIDTH'(m_axi_mem_araddr_u[i]) + C_M_AXI_MEM_ADDR_WIDTH'(`PLATFORM_MEMORY_OFFSET);
 	end
 
 	`SCOPE_IO_SWITCH (2);
@@ -328,9 +361,9 @@ module VX_afu_wrap #(
 `ifdef DBG_SCOPE_AFU
 	wire m_axi_mem_awfire_0 = m_axi_mem_awvalid_a[0] & m_axi_mem_awready_a[0];
 	wire m_axi_mem_arfire_0 = m_axi_mem_arvalid_a[0] & m_axi_mem_arready_a[0];
-	wire m_axi_mem_wfire_0 = m_axi_mem_wvalid_a[0]  & m_axi_mem_wready_a[0];
+	wire m_axi_mem_wfire_0  = m_axi_mem_wvalid_a[0]  & m_axi_mem_wready_a[0];
 	wire m_axi_mem_bfire_0  = m_axi_mem_bvalid_a[0]  & m_axi_mem_bready_a[0];
-
+	wire reset_negedge;
 	`NEG_EDGE (reset_negedge, reset);
 	`SCOPE_TAP (0, 0, {
 			ap_reset,
@@ -340,6 +373,7 @@ module VX_afu_wrap #(
 			interrupt,
 			vx_reset,
 			vx_busy,
+			state,
 			m_axi_mem_awvalid_a[0],
 			m_axi_mem_awready_a[0],
 			m_axi_mem_wvalid_a[0],
@@ -356,7 +390,7 @@ module VX_afu_wrap #(
 			m_axi_mem_arfire_0,
 			m_axi_mem_wfire_0,
 			m_axi_mem_bfire_0
-		},{
+		}, {
 			dcr_wr_addr,
 			dcr_wr_data,
 			vx_pending_writes,
@@ -383,11 +417,11 @@ module VX_afu_wrap #(
         	ap_start,
         	ap_done,
 			ap_idle,
+			state,
 			interrupt
 		}),
 		.probe1 ({
         	vx_pending_writes,
-			vx_busy_wait,
 			vx_busy,
 			vx_reset,
 			dcr_wr_valid,
@@ -428,16 +462,19 @@ module VX_afu_wrap #(
     always @(posedge clk) begin
 		for (integer i = 0; i < C_M_AXI_MEM_NUM_BANKS; ++i) begin
 			if (m_axi_mem_awvalid_a[i] && m_axi_mem_awready_a[i]) begin
-				`TRACE(2, ("%t: AXI Wr Req [%0d]: addr=0x%0h, tag=0x%0h\n", $time, i, m_axi_mem_awaddr_a[i], m_axi_mem_awid_a[i]))
+				`TRACE(2, ("%t: AXI Wr Req [%0d]: addr=0x%0h, id=0x%0h\n", $time, i, m_axi_mem_awaddr_a[i], m_axi_mem_awid_a[i]))
 			end
 			if (m_axi_mem_wvalid_a[i] && m_axi_mem_wready_a[i]) begin
-				`TRACE(2, ("%t: AXI Wr Req [%0d]: data=0x%h\n", $time, i, m_axi_mem_wdata_a[i]))
+				`TRACE(2, ("%t: AXI Wr Req [%0d]: strb=0x%h, data=0x%h\n", $time, i, m_axi_mem_wstrb_a[i], m_axi_mem_wdata_a[i]))
+			end
+			if (m_axi_mem_bvalid_a[i] && m_axi_mem_bready_a[i]) begin
+				`TRACE(2, ("%t: AXI Wr Rsp [%0d]: id=0x%0h\n", $time, i, m_axi_mem_bid_a[i]))
 			end
 			if (m_axi_mem_arvalid_a[i] && m_axi_mem_arready_a[i]) begin
-				`TRACE(2, ("%t: AXI Rd Req [%0d]: addr=0x%0h, tag=0x%0h\n", $time, i, m_axi_mem_araddr_a[i], m_axi_mem_arid_a[i]))
+				`TRACE(2, ("%t: AXI Rd Req [%0d]: addr=0x%0h, id=0x%0h\n", $time, i, m_axi_mem_araddr_a[i], m_axi_mem_arid_a[i]))
 			end
 			if (m_axi_mem_rvalid_a[i] && m_axi_mem_rready_a[i]) begin
-				`TRACE(2, ("%t: AXI Rd Rsp [%0d]: data=0x%h, tag=0x%0h\n", $time, i, m_axi_mem_rdata_a[i], m_axi_mem_rid_a[i]))
+				`TRACE(2, ("%t: AXI Rd Rsp [%0d]: data=0x%h, id=0x%0h\n", $time, i, m_axi_mem_rdata_a[i], m_axi_mem_rid_a[i]))
 			end
 		end
   	end
